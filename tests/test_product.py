@@ -1,3 +1,5 @@
+import pytest
+
 from coworker.product import current_product
 
 
@@ -15,3 +17,15 @@ def test_wenshu_product_defaults():
         "updater": False,
     }
     assert p.visible_connectors == frozenset({"browser", "wechat_official"})
+
+
+def test_wenshu_feature_flags_are_immutable():
+    p = current_product()
+
+    with pytest.raises(TypeError):
+        p.features["cloud"] = True
+
+    serialized = p.to_dict()
+    assert isinstance(serialized["features"], dict)
+    serialized["features"]["cloud"] = True
+    assert p.features["cloud"] is False

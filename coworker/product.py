@@ -1,4 +1,6 @@
-from dataclasses import asdict, dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass
+from types import MappingProxyType
 
 
 @dataclass(frozen=True)
@@ -8,12 +10,20 @@ class ProductProfile:
     display_name: str
     default_persona: str
     visible_connectors: frozenset[str]
-    features: dict[str, bool]
+    features: Mapping[str, bool]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "features", MappingProxyType(dict(self.features)))
 
     def to_dict(self) -> dict:
-        data = asdict(self)
-        data["visible_connectors"] = sorted(self.visible_connectors)
-        return data
+        return {
+            "id": self.id,
+            "name": self.name,
+            "display_name": self.display_name,
+            "default_persona": self.default_persona,
+            "visible_connectors": sorted(self.visible_connectors),
+            "features": dict(self.features),
+        }
 
 
 WENSHU_PROFILE = ProductProfile(
