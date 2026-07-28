@@ -72,6 +72,21 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+it("uses the Wenshu wordmark for the updater-disabled product shell", () => {
+  stubFetch([
+    { match: "/v1/personas", method: "GET", json: PERSONAS },
+    { match: "/v1/settings", method: "GET", json: { nav_layout: "flat" } },
+  ]);
+  const { container } = render(
+    <Sidebar
+      {...baseProps}
+      features={{ cloud: false, gallery: false, managed_oauth: false, relay: false, updater: false }}
+    />,
+  );
+
+  expect(container.querySelector(".brand-wordmark")?.textContent).toBe("文枢BETA");
+});
+
 describe("Sidebar group/filter control", () => {
   it("choosing Persona persists via setNavLayout and switches to the per-persona accordion", async () => {
     const calls = stubFetch([

@@ -608,12 +608,13 @@ def test_sidecar_token_gates_rest_and_websockets(tmp_path, monkeypatch):
     ) as ws:
         assert ws.accepted_subprotocol == "openworker"
 
-    # Redirect callbacks remain tokenless, then enforce their own signed state.
+    # Redirect callbacks remain tokenless. Disabled upstream callbacks stop at their feature
+    # gates; the local MCP callback still enforces its own pending-flow state.
     assert client.get(
         "/auth/callback", params={"code": "x", "state": "bad"}
-    ).status_code == 400
+    ).status_code == 404
     assert client.get("/mcp/oauth/callback").status_code == 400
-    assert client.post("/oauth/callback", data={"app_state": "bad"}).status_code == 400
+    assert client.post("/oauth/callback", data={"app_state": "bad"}).status_code == 404
 
 
 def test_ws_approval_round_trip(tmp_path):

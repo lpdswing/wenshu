@@ -1018,7 +1018,7 @@ export function Sidebar(props: Props) {
             <Icon name="sidebar" size={16} />
           </button>
         )}
-        <div className="brand-wordmark text-[15px]">OpenWorker<span className="beta-tag">BETA</span></div>
+        <div className="brand-wordmark text-[15px]">文枢<span className="beta-tag">BETA</span></div>
       </div>
 
       {/* New session: split button — primary starts the last-used persona; ▾ picks a specific one. */}
@@ -1247,10 +1247,10 @@ export function Sidebar(props: Props) {
               }
               aria-hidden
             >
-              {cloudSignedIn ? accountName.slice(0, 1).toUpperCase() : cloudEnabled ? "?" : "O"}
+              {cloudSignedIn ? accountName.slice(0, 1).toUpperCase() : cloudEnabled ? "?" : "文"}
             </span>
             <span className={"truncate " + (cloudEnabled && !cloudSignedIn ? "text-muted" : "")}>
-              {cloudSignedIn ? accountName : cloudEnabled ? "Not signed in" : "OpenWorker"}
+              {cloudSignedIn ? accountName : cloudEnabled ? "Not signed in" : "文枢"}
             </span>
             {cloudSignedIn && (
               <span
