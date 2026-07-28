@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -12,6 +14,7 @@ from coworker.providers import (
     ToolCall,
 )
 from coworker.server import SessionManager, create_app
+from coworker.product import current_product
 from coworker.sessions import SessionRecord
 
 
@@ -117,6 +120,16 @@ def test_disable_persona_archives_its_sessions(tmp_path):
     mk("chat-c", "chat")
     client.post("/v1/personas/chat/enable", json={"enabled": False})
     assert store.load("chat-c").archived
+
+
+def test_wenshu_lists_only_visible_connectors(tmp_path):
+    manager = SessionManager(workspace=tmp_path, provider=ScriptedProvider([]))
+
+    names = {row["name"] for row in manager.list_connectors()}
+
+    assert names <= {"browser", "wechat_official"}
+    assert "browser" in names
+    assert "slack" not in names
 
 
 def test_connector_tool_settings_and_audit_rest(tmp_path):
@@ -1027,7 +1040,20 @@ def test_always_allow_grants_survive_restart(tmp_path):
 def test_google_one_click_paused_but_manual_alive(tmp_path):
     """CASA verification pending: Gmail/Calendar/Drive expose managed_paused (GUI badges
     "Coming soon"), the managed-connect route refuses, and the manual fields stay."""
-    client = _client(tmp_path, [])
+    product = replace(
+        current_product(),
+        visible_connectors=current_product().visible_connectors
+        | {"gmail", "google_calendar", "google_drive", "slack"},
+    )
+    client = TestClient(
+        create_app(
+            SessionManager(
+                workspace=tmp_path,
+                provider=ScriptedProvider([]),
+                product=product,
+            )
+        )
+    )
     connectors = {c["name"]: c for c in client.get("/v1/connectors").json()["connectors"]}
     for name in ("gmail", "google_calendar", "google_drive"):
         c = connectors[name]

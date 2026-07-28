@@ -29,6 +29,7 @@ from .project import load_agents_md
 from .roots import RootDir, normalize_roots, render_context
 from .providers import ProviderClient, ProviderRouter
 from .overrides import RiskOverrideStore
+from .product import ProductProfile, current_product
 from .secrets import SecretStore, state_dir
 from .skills import SkillLoader, skill_catalog_text, skill_tools
 from .tools import ToolRegistry
@@ -82,8 +83,15 @@ to the user as live progress. Don't narrate trivial single-call follow-ups, don'
 the previous line, and never let narration replace your final answer."""
 
 
-def _enabled_connector_tools(secrets: SecretStore) -> tuple[set[str], set[str]]:
-    connectors = {c["name"]: c for c in connector_list(secrets)}
+def _enabled_connector_tools(
+    secrets: SecretStore,
+    product: ProductProfile,
+) -> tuple[set[str], set[str]]:
+    connectors = {
+        c["name"]: c
+        for c in connector_list(secrets)
+        if c["name"] in product.visible_connectors
+    }
     enabled_connectors = {
         name
         for name, c in connectors.items()
@@ -121,6 +129,7 @@ def build_engine(
     messages: Optional[list[dict[str, Any]]] = None,
     extra_tools: Optional[list[Any]] = None,
     secrets: Optional[SecretStore] = None,
+    product: ProductProfile | None = None,
     task_store: Optional[Any] = None,
     wake_store: Optional[Any] = None,
     session_id: Optional[str] = None,
@@ -188,7 +197,9 @@ def build_engine(
     if agent.family == "knowledge" and root_list:
         registry.register(request_directory_tool())
     if agent.connectors:
-        enabled_connectors, enabled_tools = _enabled_connector_tools(secrets)
+        enabled_connectors, enabled_tools = _enabled_connector_tools(
+            secrets, product or current_product()
+        )
         # Per-session connection hierarchy (UI-REFRESH §4.3): when the caller supplies the session's
         # effective connector set, intersect it so only effective-enabled connectors expose tools.
         # Default None preserves CLI / direct callers (no per-session restriction).

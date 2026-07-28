@@ -5,6 +5,7 @@ tool, settings/authorization, and the gateway inbound loop — all offline via F
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 
 import pytest
 
@@ -21,6 +22,7 @@ from coworker.connectors import (
 )
 from coworker.connectors.base import SendResult
 from coworker.secrets import SecretStore
+from coworker.product import current_product
 
 
 # -- target tokens -------------------------------------------------------------
@@ -212,6 +214,31 @@ class _StubProvider:
         yield StreamChunk(turn=self.complete())
 
 
+def test_hidden_connected_connector_tools_are_not_registered(tmp_path):
+    from coworker.agent import build_engine
+    from coworker.agents import cowork_agent
+    from coworker.connectors import connector_list
+
+    secrets = SecretStore(tmp_path / "secrets.json")
+    secrets.put("notion:default", {"access_token": "secret", "enabled": True})
+
+    notion = {
+        connector["name"]: connector for connector in connector_list(secrets)
+    }["notion"]
+    assert notion["connected"] is True
+    assert notion["enabled"] is True
+
+    engine = build_engine(
+        agent=cowork_agent(),
+        workspace=tmp_path,
+        provider=_StubProvider(),
+        secrets=secrets,
+        product=current_product(),
+    )
+
+    assert not any(name.startswith("notion_") for name in engine.registry.names())
+
+
 def test_engine_connector_tools_are_cowork_scoped(tmp_path):
     from coworker.agent import build_engine
     from coworker.agents import chat_agent, code_agent, cowork_agent, myhelper_agent
@@ -276,6 +303,10 @@ def test_engine_connector_tools_are_cowork_scoped(tmp_path):
         workspace=tmp_path,
         provider=_StubProvider(),
         secrets=secrets,
+        product=replace(
+            current_product(),
+            visible_connectors=current_product().visible_connectors | {"github"},
+        ),
     )
     assert "github_search" in cowork_with_github.registry.names()
     # §36: github_search is a registry READ — free; the write sibling still gates.
@@ -531,7 +562,17 @@ def test_connectors_rest(tmp_path, monkeypatch):
         desc, "validate", lambda creds: ValidationResult(True, identity="@testbot")
     )
 
-    client = TestClient(create_app(SessionManager(data_dir=tmp_path / "data")))
+    client = TestClient(
+        create_app(
+            SessionManager(
+                data_dir=tmp_path / "data",
+                product=replace(
+                    current_product(),
+                    visible_connectors=current_product().visible_connectors | {"telegram"},
+                ),
+            )
+        )
+    )
 
     listed = client.get("/v1/connectors").json()["connectors"]
     assert any(c["name"] == "telegram" for c in listed)
@@ -1691,7 +1732,18 @@ def test_experimental_rest_roundtrip(tmp_path, monkeypatch, experimental_descrip
     from coworker.server.manager import SessionManager
 
     monkeypatch.setenv("COWORKER_STATE_DIR", str(tmp_path / "state"))
-    client = TestClient(create_app(SessionManager(data_dir=tmp_path / "data")))
+    client = TestClient(
+        create_app(
+            SessionManager(
+                data_dir=tmp_path / "data",
+                product=replace(
+                    current_product(),
+                    visible_connectors=current_product().visible_connectors
+                    | {"dangerzone"},
+                ),
+            )
+        )
+    )
 
     assert client.get("/v1/settings").json()["experimental_connectors"] is False
     names = {c["name"] for c in client.get("/v1/connectors").json()["connectors"]}

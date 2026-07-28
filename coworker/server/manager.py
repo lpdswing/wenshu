@@ -428,6 +428,7 @@ class SessionManager:
             messages=messages,
             extra_tools=extra_tools,
             secrets=self.secrets,
+            product=self.product,
             task_store=self.task_store,
             wake_store=self.wakes,
             session_id=session_id,
@@ -1143,7 +1144,11 @@ class SessionManager:
                     u: self._people.get(f"{c['name']}:{u}")
                     for u in (w.get("approval_owner_ids") or [])
                 }
-        return connectors
+        return [
+            connector
+            for connector in connectors
+            if connector["name"] in self.product.visible_connectors
+        ]
 
     def connect_connector(
         self, name: str, fields: dict[str, Any], *, acknowledged: bool = False
@@ -2581,6 +2586,7 @@ class SessionManager:
             provider=self.provider,
             memory_store=self.memory_store,
             secrets=self.secrets,
+            product=self.product,
             # No scheduling tools inside a scheduled run: the executing agent's job is to DO the
             # task, and instructions that mention timing ("every day at 5:32pm…") otherwise tempt
             # it to create another automation instead of running this one.
