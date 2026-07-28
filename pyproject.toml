@@ -18,7 +18,8 @@ dependencies = [
     # swap for a PyPI pin ("aisuite>=x.y") once the next aisuite release ships.
     "aisuite @ git+https://github.com/andrewyng/aisuite.git@1b4bbf303ec21968230b1ec869a144d054e9b3c4",
     "docstring_parser",
-    "pyyaml>=6",  # persona manifest frontmatter (YAML)
+    "PyYAML>=6.0",  # YAML frontmatter
+    "markdown-it-py>=4.0",  # Markdown parsing and rendering
     "pydantic>=2",
     "mcp>=1.1",  # MCP client (stdio + streamable-http); we use our own async layer on it
     "httpx>=0.27",  # sync outbound senders for messaging connectors (send_message tool)
