@@ -230,13 +230,17 @@ def test_subscribe_unsubscribe_and_recent_endpoints(tmp_path):
     assert mgr.subscriptions.for_session("sZ") == []
 
 
-def test_unauthorized_messages_park_and_resolve(tmp_path, monkeypatch):
+def test_unauthorized_messages_park_and_resolve(
+    tmp_path, monkeypatch, permissive_product
+):
     """§19: an allow-list drop PARKS the message; resolving it can dismiss, allow the sender,
     or allow AND deliver the original message through the normal inbound path (no re-send).
     """
     from coworker.connectors import Gateway
 
-    mgr = SessionManager(workspace=tmp_path, provider=ScriptedProvider([]))
+    mgr = SessionManager(
+        workspace=tmp_path, provider=ScriptedProvider([]), product=permissive_product
+    )
     _connect_slack(mgr)
     delivered: list[tuple[str, str]] = []
 

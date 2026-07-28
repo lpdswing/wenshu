@@ -221,8 +221,10 @@ def test_dm_muted_session_not_delivered(tmp_path, monkeypatch):
 
 
 # -- runtime gating: outbound / tools ------------------------------------------
-def test_muted_connector_tools_absent(tmp_path):
-    mgr = SessionManager(workspace=tmp_path, provider=ScriptedProvider())
+def test_muted_connector_tools_absent(tmp_path, permissive_product):
+    mgr = SessionManager(
+        workspace=tmp_path, provider=ScriptedProvider(), product=permissive_product
+    )
     # github connected so its tools would otherwise be exposed to a connectors persona (cowork)
     mgr.secrets.put("github:default", {"token": "ghp_test", "enabled": True})
 

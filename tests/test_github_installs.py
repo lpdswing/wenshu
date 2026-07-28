@@ -32,9 +32,9 @@ def _fresh_token_cache():
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, permissive_product):
     monkeypatch.setenv("COWORKER_STATE_DIR", str(tmp_path / "state"))
-    manager = SessionManager(workspace=tmp_path)
+    manager = SessionManager(workspace=tmp_path, product=permissive_product)
     app = create_app(manager)
     with TestClient(app) as c:
         c.manager = manager

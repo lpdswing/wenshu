@@ -23,8 +23,10 @@ class NoTurnsProvider(ProviderClient):
         return ModelCapabilities()
 
 
-def _manager(tmp_path) -> SessionManager:
-    return SessionManager(data_dir=tmp_path / "data", provider=NoTurnsProvider())
+def _manager(tmp_path, *, product=None) -> SessionManager:
+    return SessionManager(
+        data_dir=tmp_path / "data", provider=NoTurnsProvider(), product=product
+    )
 
 
 def _manual_profile(manager: SessionManager, **extra) -> None:
@@ -68,8 +70,10 @@ def test_manual_owner_is_required_for_binding_and_implies_allowed(tmp_path):
     assert manager.slack_approval_owner_ids() == {"U_SECOND"}
 
 
-def test_manual_owner_rest_flow_surfaces_identity_and_binding(tmp_path):
-    manager = _manager(tmp_path)
+def test_manual_owner_rest_flow_surfaces_identity_and_binding(
+    tmp_path, permissive_product
+):
+    manager = _manager(tmp_path, product=permissive_product)
     _manual_profile(manager)
     client = TestClient(create_app(manager))
 

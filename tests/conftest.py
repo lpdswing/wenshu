@@ -11,6 +11,8 @@ from __future__ import annotations
 import pytest
 import pytest_asyncio
 
+from coworker.connectors.descriptors import list_descriptors
+from coworker.product import ProductProfile
 from coworker.testing.fake_slack import FakeSlack
 
 
@@ -22,6 +24,30 @@ def _isolated_state_dir(tmp_path, monkeypatch):
     as burst noise in the ocw-connect-telemetry-events table)."""
     monkeypatch.setenv("COWORKER_STATE_DIR", str(tmp_path / "coworker-state"))
     monkeypatch.delenv("COWORKER_API_TOKEN", raising=False)
+
+
+_PERMISSIVE_PRODUCT = ProductProfile(
+    id="openworker-test",
+    name="OpenWorker Test",
+    display_name="OpenWorker Test",
+    default_persona="cowork",
+    visible_connectors=frozenset(
+        descriptor.name for descriptor in list_descriptors()
+    ),
+    features={
+        "cloud": True,
+        "gallery": True,
+        "managed_oauth": True,
+        "relay": True,
+        "updater": True,
+    },
+)
+
+
+@pytest.fixture(scope="session")
+def permissive_product() -> ProductProfile:
+    """Opt legacy tests into the historical all-feature, all-connector product."""
+    return _PERMISSIVE_PRODUCT
 
 
 @pytest_asyncio.fixture

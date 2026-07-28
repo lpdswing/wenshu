@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -14,7 +12,6 @@ from coworker.providers import (
     ToolCall,
 )
 from coworker.server import SessionManager, create_app
-from coworker.product import current_product
 from coworker.sessions import SessionRecord
 
 
@@ -1038,20 +1035,15 @@ def test_always_allow_grants_survive_restart(tmp_path):
     _run_turn(TestClient(create_app(mgr2)), expect_prompts=0)
 
 
-def test_google_one_click_paused_but_manual_alive(tmp_path):
+def test_google_one_click_paused_but_manual_alive(tmp_path, permissive_product):
     """CASA verification pending: Gmail/Calendar/Drive expose managed_paused (GUI badges
     "Coming soon"), the managed-connect route refuses, and the manual fields stay."""
-    product = replace(
-        current_product(),
-        visible_connectors=current_product().visible_connectors
-        | {"gmail", "google_calendar", "google_drive", "slack"},
-    )
     client = TestClient(
         create_app(
             SessionManager(
                 workspace=tmp_path,
                 provider=ScriptedProvider([]),
-                product=product,
+                product=permissive_product,
             )
         )
     )
