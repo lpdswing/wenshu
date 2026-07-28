@@ -20,6 +20,7 @@ dependencies = [
     "docstring_parser",
     "PyYAML>=6.0",  # YAML frontmatter
     "markdown-it-py>=4.0",  # Markdown parsing and rendering
+    "Pillow>=10.0",  # generated image validation and format-safe writes
     "pydantic>=2",
     "mcp>=1.1",  # MCP client (stdio + streamable-http); we use our own async layer on it
     "httpx>=0.27",  # sync outbound senders for messaging connectors (send_message tool)
