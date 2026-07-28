@@ -800,12 +800,16 @@ def create_app(manager: SessionManager) -> FastAPI:
     async def connector_disconnect(name: str) -> dict[str, Any]:
         # Managed profiles: best-effort flip of the cloud metadata record first
         # (network call → off the loop). Local deletion always proceeds.
-        from .. import cloud
-        from ..config import load_config
+        if (
+            manager.product.features.get("cloud", False)
+            and manager.product.features.get("managed_oauth", False)
+        ):
+            from .. import cloud
+            from ..config import load_config
 
-        await asyncio.to_thread(
-            lambda: cloud.cloud_disconnect(manager.secrets, load_config(), name)
-        )
+            await asyncio.to_thread(
+                lambda: cloud.cloud_disconnect(manager.secrets, load_config(), name)
+            )
         result = manager.disconnect_connector(name)
         await _refresh_listeners_if_two_way(name)
         return result
@@ -837,16 +841,21 @@ def create_app(manager: SessionManager) -> FastAPI:
     async def gmail_account_disconnect(email: str) -> dict[str, Any]:
         """Drop ONE mailbox (cloud metadata best-effort first, like a full
         disconnect); the default pointer moves to the next account."""
-        from .. import cloud
-        from ..config import load_config
         from ..connectors import gmail_accounts
 
         profile_key = gmail_accounts.PREFIX + email.strip().lower()
-        await asyncio.to_thread(
-            lambda: cloud.cloud_disconnect(
-                manager.secrets, load_config(), "gmail", profile_key=profile_key
+        if (
+            manager.product.features.get("cloud", False)
+            and manager.product.features.get("managed_oauth", False)
+        ):
+            from .. import cloud
+            from ..config import load_config
+
+            await asyncio.to_thread(
+                lambda: cloud.cloud_disconnect(
+                    manager.secrets, load_config(), "gmail", profile_key=profile_key
+                )
             )
-        )
         return gmail_accounts.disconnect_account(manager.secrets, email)
 
     @app.post("/v1/connectors/gmail/accounts/{email}/default")
@@ -873,19 +882,24 @@ def create_app(manager: SessionManager) -> FastAPI:
     async def gcal_account_disconnect(email: str) -> dict[str, Any]:
         """Drop ONE Google Calendar account (cloud metadata best-effort first);
         the default pointer moves to the next account."""
-        from .. import cloud
-        from ..config import load_config
         from ..connectors import gcal_accounts
 
         profile_key = gcal_accounts.PREFIX + email.strip().lower()
-        await asyncio.to_thread(
-            lambda: cloud.cloud_disconnect(
-                manager.secrets,
-                load_config(),
-                "google_calendar",
-                profile_key=profile_key,
+        if (
+            manager.product.features.get("cloud", False)
+            and manager.product.features.get("managed_oauth", False)
+        ):
+            from .. import cloud
+            from ..config import load_config
+
+            await asyncio.to_thread(
+                lambda: cloud.cloud_disconnect(
+                    manager.secrets,
+                    load_config(),
+                    "google_calendar",
+                    profile_key=profile_key,
+                )
             )
-        )
         return gcal_accounts.disconnect_account(manager.secrets, email)
 
     @app.post("/v1/connectors/google_calendar/accounts/{email}/default")
@@ -896,16 +910,21 @@ def create_app(manager: SessionManager) -> FastAPI:
 
     @app.post("/v1/connectors/hubspot/portals/{hub_id}/disconnect")
     async def hubspot_portal_disconnect(hub_id: str) -> dict[str, Any]:
-        from .. import cloud
-        from ..config import load_config
         from ..connectors import hubspot_portals
 
         profile_key = hubspot_portals.PREFIX + hub_id.strip()
-        await asyncio.to_thread(
-            lambda: cloud.cloud_disconnect(
-                manager.secrets, load_config(), "hubspot", profile_key=profile_key
+        if (
+            manager.product.features.get("cloud", False)
+            and manager.product.features.get("managed_oauth", False)
+        ):
+            from .. import cloud
+            from ..config import load_config
+
+            await asyncio.to_thread(
+                lambda: cloud.cloud_disconnect(
+                    manager.secrets, load_config(), "hubspot", profile_key=profile_key
+                )
             )
-        )
         return hubspot_portals.disconnect_portal(manager.secrets, hub_id)
 
     @app.post("/v1/connectors/hubspot/portals/{hub_id}/default")
@@ -918,14 +937,20 @@ def create_app(manager: SessionManager) -> FastAPI:
     async def account_disconnect(name: str, account_id: str) -> dict[str, Any]:
         """Generic per-account disconnect for account-patterned connectors
         (batch 2+). Gmail/Calendar keep their specific email routes."""
-        from .. import cloud
-        from ..config import load_config
         from ..connectors import accounts
 
         if not accounts.is_account_connector(name):
             return {"ok": False, "error": "not a multi-account connector"}
         _id, profile_key, profile = accounts.resolve(manager.secrets, name, account_id)
-        if profile and profile.get("managed"):
+        if (
+            profile
+            and profile.get("managed")
+            and manager.product.features.get("cloud", False)
+            and manager.product.features.get("managed_oauth", False)
+        ):
+            from .. import cloud
+            from ..config import load_config
+
             await asyncio.to_thread(
                 lambda: cloud.cloud_disconnect(
                     manager.secrets, load_config(), name, profile_key=profile_key

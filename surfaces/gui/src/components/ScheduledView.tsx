@@ -9,6 +9,7 @@ import {
   updateAutomation,
   type Automation,
   type AutomationRun,
+  type ProductInfo,
 } from "../api";
 import { Icon } from "./Icon";
 import { PanelHead } from "./IntegrationsView";
@@ -59,11 +60,12 @@ interface Props {
     task?: { id: string; title: string },
   ) => void;
   onRunNow: (taskId: string, title?: string) => void;
+  features: ProductInfo["features"];
   // Open directly on a task's detail (set by the run banner's "Back to runs").
   initialOpenId?: string | null;
 }
 
-export function ScheduledView({ onOpenRun, onRunNow, initialOpenId }: Props) {
+export function ScheduledView({ onOpenRun, onRunNow, features, initialOpenId }: Props) {
   const [tasks, setTasks] = useState<Automation[]>([]);
   const [openId, setOpenId] = useState<string | null>(initialOpenId ?? null);
   const [showForm, setShowForm] = useState(false);
@@ -151,7 +153,13 @@ export function ScheduledView({ onOpenRun, onRunNow, initialOpenId }: Props) {
 
       {/* The quickstart (§29): ONE template system — role recipes + generic templates, each
           card with §27 connector dots; picking one expands the configure card. */}
-      {(empty || showForm) && <AutomationQuickstart busy={busy !== null} onCreate={create} />}
+      {(empty || showForm) && (
+        <AutomationQuickstart
+          busy={busy !== null}
+          features={features}
+          onCreate={create}
+        />
+      )}
 
       {empty ? (
         !showForm && (

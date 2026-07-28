@@ -1302,6 +1302,7 @@ export function App() {
         <ScheduledView
           onOpenRun={openRunSession}
           onRunNow={runTaskNow}
+          features={productFeatures}
           initialOpenId={scheduledOpenId}
         />
       ) : surface === "integrations" ? (

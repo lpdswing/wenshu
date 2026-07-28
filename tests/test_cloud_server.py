@@ -109,6 +109,136 @@ def test_disabled_routes_return_before_upstream_calls(
     assert response.json() == {"error": "feature disabled"}
 
 
+
+def test_new_session_skips_cloud_telemetry_when_cloud_is_disabled(
+    wenshu_client, monkeypatch
+):
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("disabled Cloud must not start a telemetry worker")
+
+    monkeypatch.setattr(
+        wenshu_client.manager, "_emit_session_created", forbidden
+    )
+
+    wenshu_client.manager.get_engine("local-only")
+
+
+@pytest.mark.parametrize(
+    ("path", "profiles", "deleted_key"),
+    [
+        (
+            "/v1/connectors/gmail/disconnect",
+            {"gmail:default": {"type": "oauth", "managed": True}},
+            "gmail:default",
+        ),
+        (
+            "/v1/connectors/gmail/accounts/a%40b.c/disconnect",
+            {
+                "gmail:account:a@b.c": {
+                    "type": "oauth",
+                    "managed": True,
+                    "access_token": "token",
+                },
+                "gmail:default": {
+                    "type": "oauth",
+                    "enabled": True,
+                    "default_account": "a@b.c",
+                },
+            },
+            "gmail:account:a@b.c",
+        ),
+        (
+            "/v1/connectors/google_calendar/accounts/a%40b.c/disconnect",
+            {
+                "google_calendar:account:a@b.c": {
+                    "type": "oauth",
+                    "managed": True,
+                    "access_token": "token",
+                },
+                "google_calendar:default": {
+                    "type": "oauth",
+                    "enabled": True,
+                    "default_account": "a@b.c",
+                },
+            },
+            "google_calendar:account:a@b.c",
+        ),
+        (
+            "/v1/connectors/hubspot/portals/123/disconnect",
+            {
+                "hubspot:portal:123": {
+                    "type": "oauth",
+                    "managed": True,
+                    "token": "token",
+                    "hub_id": "123",
+                },
+                "hubspot:default": {
+                    "type": "oauth",
+                    "enabled": True,
+                    "default_portal": "123",
+                },
+            },
+            "hubspot:portal:123",
+        ),
+        (
+            "/v1/connectors/outlook/accounts/a%40b.c/disconnect",
+            {
+                "outlook:account:a@b.c": {
+                    "type": "oauth",
+                    "managed": True,
+                    "access_token": "token",
+                },
+                "outlook:default": {
+                    "type": "oauth",
+                    "enabled": True,
+                    "default_account": "a@b.c",
+                },
+            },
+            "outlook:account:a@b.c",
+        ),
+    ],
+)
+def test_disabled_cloud_disconnects_stay_local(
+    wenshu_client, monkeypatch, path, profiles, deleted_key
+):
+    from coworker import cloud
+
+    for key, profile in profiles.items():
+        wenshu_client.manager.secrets.put(key, profile)
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("disabled Cloud must not receive disconnect metadata")
+
+    monkeypatch.setattr(cloud, "cloud_disconnect", forbidden)
+
+    response = wenshu_client.post(path)
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert wenshu_client.manager.secrets.get(deleted_key) is None
+
+
+def test_enabled_cloud_disconnect_still_cleans_upstream_metadata(
+    client, monkeypatch
+):
+    from coworker import cloud
+
+    client.manager.secrets.put(
+        "gmail:default", {"type": "oauth", "managed": True}
+    )
+    calls = []
+    monkeypatch.setattr(
+        cloud,
+        "cloud_disconnect",
+        lambda *_args, **_kwargs: calls.append("gmail"),
+    )
+
+    response = client.post("/v1/connectors/gmail/disconnect")
+
+    assert response.json()["ok"] is True
+    assert calls == ["gmail"]
+
+
 def test_cloud_status_signed_out(client):
     body = client.get("/v1/cloud/status").json()
     assert body == {

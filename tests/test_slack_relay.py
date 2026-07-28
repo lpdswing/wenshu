@@ -427,6 +427,74 @@ def test_make_adapter_loads_per_team_tokens():
     assert adapter._bot_token("T9") == "xoxb-9"
 
 
+
+@pytest.mark.asyncio
+async def test_disabled_relay_disconnects_slack_workspace_locally(
+    tmp_path, monkeypatch
+):
+    from coworker import cloud
+
+    manager = SessionManager(data_dir=tmp_path)
+    manager.secrets.put(
+        "slack:default",
+        {"type": "oauth", "managed": True, "mode": "relay", "enabled": True},
+    )
+    manager.secrets.put(
+        "slack:team:T1",
+        {"type": "oauth", "managed": True, "bot_token": "xoxb-1"},
+    )
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("disabled Relay must not call Cloud on disconnect")
+
+    async def no_refresh():
+        return None
+
+    monkeypatch.setattr(cloud, "slack_disconnect_workspace", forbidden)
+    monkeypatch.setattr(manager, "refresh_gateway", no_refresh)
+
+    result = await manager.disconnect_slack_workspace("T1")
+
+    assert result == {"ok": True, "remaining_workspaces": 0}
+    assert manager.secrets.get("slack:team:T1") is None
+
+
+@pytest.mark.asyncio
+async def test_disabled_relay_disconnects_github_installation_locally(
+    tmp_path, monkeypatch
+):
+    from coworker import cloud
+
+    manager = SessionManager(data_dir=tmp_path)
+    manager.secrets.put(
+        "github:default",
+        {"type": "oauth", "managed": True, "mode": "relay", "enabled": True},
+    )
+    manager.secrets.put(
+        "github:install:101",
+        {
+            "type": "oauth",
+            "managed": True,
+            "installation_id": "101",
+            "account_login": "acme",
+        },
+    )
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("disabled Relay must not call Cloud on disconnect")
+
+    async def no_refresh():
+        return None
+
+    monkeypatch.setattr(cloud, "github_disconnect_installation", forbidden)
+    monkeypatch.setattr(manager, "refresh_gateway", no_refresh)
+
+    result = await manager.disconnect_github_installation("101")
+
+    assert result == {"ok": True, "remaining_installs": 0}
+    assert manager.secrets.get("github:install:101") is None
+
+
 class _GatewayTestAdapter:
     def __init__(self, platform: str):
         self.platform = platform

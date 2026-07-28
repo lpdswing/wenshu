@@ -464,7 +464,7 @@ class SessionManager:
         if record is not None and record.grants:
             self._apply_grants(engine, record.grants)
         self._engines[session_id] = engine
-        if is_new_session:
+        if is_new_session and self.product.features.get("cloud", False):
             self._emit_session_created(session_id, agent_name)
         return engine
 
@@ -2136,14 +2136,15 @@ class SessionManager:
         profile_key = f"slack:team:{team_id}"
         if not team_id or not self.secrets.get(profile_key):
             return {"ok": False, "error": "workspace not connected"}
-        from .. import cloud
-        from ..config import load_config
+        if self.product.features.get("relay", False):
+            from .. import cloud
+            from ..config import load_config
 
-        await asyncio.to_thread(
-            lambda: cloud.slack_disconnect_workspace(
-                self.secrets, load_config(), team_id
+            await asyncio.to_thread(
+                lambda: cloud.slack_disconnect_workspace(
+                    self.secrets, load_config(), team_id
+                )
             )
-        )
         self.secrets.delete(profile_key)
         remaining = [
             m["profile"]
@@ -2214,19 +2215,21 @@ class SessionManager:
         (best-effort), drop the local profile, hot-reload the gateway. The Slack
         per-workspace disconnect, GitHub flavour — a manual PAT stays untouched."""
         installation_id = str(installation_id).strip()
-        from .. import cloud
-        from ..config import load_config
         from ..connectors import github_installs
 
         if not installation_id or not self.secrets.get(
             github_installs.PREFIX + installation_id
         ):
             return {"ok": False, "error": "installation not connected"}
-        await asyncio.to_thread(
-            lambda: cloud.github_disconnect_installation(
-                self.secrets, load_config(), installation_id
+        if self.product.features.get("relay", False):
+            from .. import cloud
+            from ..config import load_config
+
+            await asyncio.to_thread(
+                lambda: cloud.github_disconnect_installation(
+                    self.secrets, load_config(), installation_id
+                )
             )
-        )
         result = github_installs.disconnect_install(self.secrets, installation_id)
         await self.refresh_gateway()
         return result

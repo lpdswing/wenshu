@@ -42,3 +42,26 @@ test("WenShu onboarding hides Cloud sign-in and managed OAuth entry points", asy
   await expect(page.getByRole("button", { name: "Connect" })).toHaveCount(0);
   expect(featureRequests).toEqual([]);
 });
+
+test("WenShu automations stay local without managed templates or Cloud polling", async ({
+  page,
+}) => {
+  const featureRequests = trackDisabledFeatureRequests(page);
+
+  await page.goto("/");
+  await page.getByTestId("account-row").click();
+  await page
+    .getByTestId("account-menu")
+    .getByRole("button", { name: "Automations", exact: true })
+    .click();
+  await page.getByRole("button", { name: "+ New automation" }).click();
+
+  await expect(page.getByTestId("qs-template-news")).toBeVisible();
+  await expect(page.getByTestId("qs-template-cleanup")).toBeVisible();
+  await expect(page.getByTestId("qs-template-github")).toHaveCount(0);
+  await expect(page.getByTestId("qs-template-pipeline")).toHaveCount(0);
+  await expect(page.getByTestId("qs-template-brief")).toHaveCount(0);
+  await expect(page.getByTestId("qs-template-inboxdigest")).toHaveCount(0);
+  await expect(page.getByTestId("ob-cloud-signin")).toHaveCount(0);
+  expect(featureRequests).toEqual([]);
+});
