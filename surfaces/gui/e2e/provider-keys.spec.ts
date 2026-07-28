@@ -77,6 +77,9 @@ test("OpenAI image model is separate from chat models and persists custom ids", 
   await page.getByTestId("set-provider-openai").click();
 
   const imageModel = page.getByTestId("set-field-image_model");
+  await expect(page.getByTestId("image-generation-status")).toContainText(
+    "已配置 · gpt-image-2",
+  );
   await expect(imageModel).toHaveValue("gpt-image-2");
   await expect(imageModel).toHaveAttribute("list", "set-options-image_model");
   await expect(page.getByTestId("set-field-api_key")).toHaveValue("");
@@ -89,4 +92,7 @@ test("OpenAI image model is separate from chat models and persists custom ids", 
   await page.getByTestId("set-provider-openai").click();
   await expect(page.getByTestId("set-field-image_model")).toHaveValue("custom-image:v2");
   await expect(page.getByTestId("set-field-api_key")).toHaveValue("");
+  await expect(page.getByTestId("image-generation-status")).toContainText(
+    "已配置 · custom-image:v2",
+  );
 });

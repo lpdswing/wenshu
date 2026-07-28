@@ -1277,6 +1277,19 @@ export interface ProviderField {
   default?: string; // pre-filled editable value (e.g. an OpenAI-compatible vendor's endpoint)
   options?: string[]; // suggested values; the text field still accepts a custom id
 }
+export interface ImageGenerationStatus {
+  configured: boolean;
+  provider: string;
+  model: string;
+}
+
+export async function getImageGenerationStatus(): Promise<ImageGenerationStatus> {
+  const res = await fetch(`${httpBase()}/v1/image-generation/status`);
+  if (!res.ok) throw new Error(`image generation status failed: ${res.status}`);
+  return res.json();
+}
+
+
 
 export interface ProviderInfo {
   name: string;

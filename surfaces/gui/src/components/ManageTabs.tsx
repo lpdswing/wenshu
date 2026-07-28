@@ -11,6 +11,7 @@ import {
   getMcpServers,
   getMcpTools,
   signoutMcp,
+  getImageGenerationStatus,
   getSettings,
   getSubscriptions,
   removeModel,
@@ -24,6 +25,7 @@ import {
   type Connector,
   type Subscription,
   type McpServer,
+  type ImageGenerationStatus,
   type ModelSettings,
   type ProviderInfo,
 } from "../api";
@@ -77,7 +79,11 @@ const EXAMPLE = `{
 // per-provider ModelChecklist / read-only model preview (form view).
 export function ModelsTab() {
   const [settings, setSettings] = useState<ModelSettings | null>(null);
-  const refreshSettings = () => getSettings().then(setSettings).catch(() => setSettings(null));
+  const [imageGeneration, setImageGeneration] = useState<ImageGenerationStatus | null>(null);
+  const refreshSettings = () => {
+    getImageGenerationStatus().then(setImageGeneration).catch(() => setImageGeneration(null));
+    return getSettings().then(setSettings).catch(() => setSettings(null));
+  };
   const ps = useProviderSetup({ onSaved: refreshSettings });
   useEffect(() => {
     refreshSettings();
@@ -116,6 +122,25 @@ export function ModelsTab() {
           ) : null
         }
       />
+      {ps.sel === "openai" && (
+        <div
+          className={CARD + " mt-4 px-3 py-2.5 flex items-center justify-between gap-3"}
+          data-testid="image-generation-status"
+        >
+          <span className="text-[12.5px] font-medium text-ink">图片生成</span>
+          <span
+            className={
+              "text-[12px] " +
+              (imageGeneration?.configured ? "text-ok" : "text-muted")
+            }
+          >
+            {imageGeneration
+              ? `${imageGeneration.configured ? "已配置" : "未配置"} · ${imageGeneration.model}`
+              : "检查中…"}
+          </span>
+        </div>
+      )}
+
 
       {ps.sel === "openai" && settings.source === "env" && (
         <p className="text-[12px] text-muted mt-3 leading-relaxed">

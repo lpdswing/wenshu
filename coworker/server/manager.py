@@ -72,6 +72,7 @@ from ..mcp import (
 from ..memory import MemoryStore, Scope, SQLiteMemoryStore
 from ..permissions import Mode
 from ..agents import list_agents as _list_agents
+from ..image_generation import ImageAuthError, build_image_provider
 from ..product import ProductProfile, current_product
 from ..providers import (
     DEFAULT_OPENAI_IMAGE_MODEL,
@@ -1464,6 +1465,24 @@ class SessionManager:
         self.secrets.put("web_search:default", profile)
         return {"ok": True, "provider": provider}
 
+    def get_image_generation_status(self) -> dict[str, Any]:
+        """Return the effective non-secret image configuration for readiness UI."""
+        try:
+            provider = build_image_provider(self.secrets)
+        except (ImageAuthError, ValueError):
+            profile = self.secrets.get("provider:openai") or {}
+            try:
+                model = normalize_openai_image_model(profile.get("image_model"))
+            except (AttributeError, ValueError):
+                model = DEFAULT_OPENAI_IMAGE_MODEL
+            return {"configured": False, "provider": "openai", "model": model}
+        return {
+            "configured": True,
+            "provider": "openai",
+            "model": provider.model,
+        }
+
+
     # -- model providers (OpenAI, Ollama, …) ------------------------------------
     def get_providers(self) -> list[dict[str, Any]]:
         """Descriptor + per-provider status for the Settings UI. Never returns secret values;
@@ -1626,7 +1645,18 @@ class SessionManager:
                 profile[f.key] = val
             elif not f.required:
                 profile.pop(f.key, None)
-        missing = [f.label for f in d.fields if f.required and not profile.get(f.key)]
+        missing = [
+            f.label
+            for f in d.fields
+            if f.required
+            and not profile.get(f.key)
+            and not (
+                f.secret
+                and d.env_key
+                and isinstance(os.environ.get(d.env_key), str)
+                and os.environ[d.env_key].strip()
+            )
+        ]
         if missing:
             return {"ok": False, "error": "missing: " + ", ".join(missing)}
         # A (re)pasted key stamps its save date — Settings shows "key added <date>" so stale

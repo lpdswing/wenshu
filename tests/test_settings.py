@@ -228,6 +228,27 @@ def test_openai_image_model_round_trip_without_key_leak(tmp_path, monkeypatch):
     assert row["image_model"] == "gpt-image-2"
     assert row["values"]["image_model"] == "gpt-image-2"
     assert "sk-secret" not in repr(row)
+    reborn = SessionManager(data_dir=tmp_path / "data")
+    reborn_row = next(
+        provider for provider in reborn.get_providers() if provider["name"] == "openai"
+    )
+    assert reborn_row["image_model"] == "gpt-image-2"
+
+
+def test_env_key_allows_image_model_only_save(tmp_path, monkeypatch):
+    from coworker.server.manager import SessionManager
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-env-only")
+    monkeypatch.setenv("COWORKER_STATE_DIR", str(tmp_path / "state"))
+    manager = SessionManager(data_dir=tmp_path / "data")
+
+    result = manager.set_provider("openai", {"image_model": "custom-image:v4"})
+    row = next(provider for provider in manager.get_providers() if provider["name"] == "openai")
+
+    assert result["ok"] is True
+    assert row["configured"] is True
+    assert row["image_model"] == "custom-image:v4"
+    assert "sk-env-only" not in repr(row)
 
 
 def test_openai_image_model_defaults_and_rejects_invalid_ids(tmp_path, monkeypatch):
@@ -246,3 +267,37 @@ def test_openai_image_model_defaults_and_rejects_invalid_ids(tmp_path, monkeypat
     assert rejected["ok"] is False
     row = next(provider for provider in manager.get_providers() if provider["name"] == "openai")
     assert row["image_model"] == "custom-image:v2"
+
+
+def test_image_generation_status_reports_configuration_without_secrets(
+    tmp_path, monkeypatch
+):
+    from fastapi.testclient import TestClient
+
+    from coworker.server.app import create_app
+    from coworker.server.manager import SessionManager
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("COWORKER_STATE_DIR", str(tmp_path / "state"))
+    manager = SessionManager(data_dir=tmp_path / "data")
+    client = TestClient(create_app(manager))
+
+    missing = client.get("/v1/image-generation/status")
+    assert missing.status_code == 200
+    assert missing.json() == {
+        "configured": False,
+        "provider": "openai",
+        "model": "gpt-image-2",
+    }
+
+    manager.set_provider(
+        "openai", {"api_key": "sk-status-secret", "image_model": "custom-image:v3"}
+    )
+    configured = client.get("/v1/image-generation/status")
+    assert configured.status_code == 200
+    assert configured.json() == {
+        "configured": True,
+        "provider": "openai",
+        "model": "custom-image:v3",
+    }
+    assert "sk-status-secret" not in configured.text

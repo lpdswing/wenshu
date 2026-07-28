@@ -1328,6 +1328,14 @@ export async function mockApi(
         ],
       });
     }
+    if (p.endsWith("/v1/image-generation/status")) {
+      const openai = providers.find((provider) => provider.name === "openai");
+      return json({
+        configured: Boolean(openai?.configured),
+        provider: "openai",
+        model: openai?.values?.image_model || openai?.image_model || "gpt-image-2",
+      });
+    }
     // provider credential check (read-only) — an api_key containing "bad" fails, else ok.
     if (p.endsWith("/v1/providers/verify") && m === "POST") {
       const key = String(req.postDataJSON()?.fields?.api_key || "");

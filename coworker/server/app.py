@@ -1357,6 +1357,11 @@ def create_app(manager: SessionManager) -> FastAPI:
             return {"ok": False, "error": "provider required"}
         return manager.set_web_search(provider, (body or {}).get("api_key"))
 
+    @app.get("/v1/image-generation/status")
+    def image_generation_status() -> dict[str, Any]:
+        return manager.get_image_generation_status()
+
+
     # -- model providers (OpenAI, Ollama, …) ------------------------------------
     @app.get("/v1/providers")
     def providers_get() -> list[dict[str, Any]]:
