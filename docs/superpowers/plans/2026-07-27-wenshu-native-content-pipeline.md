@@ -363,7 +363,7 @@ git commit -m "feat: add OpenAI image generation adapter"
 - Modify: `tests/test_settings.py`
 - Modify: `surfaces/gui/src/api.ts`
 - Modify: `surfaces/gui/src/providers/ProviderSetup.tsx`
-- Modify: `surfaces/gui/src/providers/ProviderSetup.test.tsx`
+- Create: `surfaces/gui/src/providers/ProviderSetup.test.tsx`
 
 **Interfaces:**
 - Produces: OpenAI provider profile 的非敏感 `image_model` 设置，默认 `gpt-image-2`。
@@ -559,7 +559,7 @@ git commit -m "feat: expose native content tools to Wenshu"
 - Modify: `surfaces/gui/src/components/ApprovalCard.tsx`
 - Modify: `surfaces/gui/src/components/ApprovalCard.test.tsx`
 - Modify: `surfaces/gui/e2e/approval-card.spec.ts`
-- Modify: `surfaces/gui/e2e/artifact-preview.spec.ts`
+- Create: `surfaces/gui/e2e/artifact-preview.spec.ts`
 
 **Interfaces:**
 - Consumes: Tool args/result，不新增后端 UI 专用 endpoint。
