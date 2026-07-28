@@ -22,7 +22,7 @@
 .venv/bin/pytest -q
 ```
 
-结果：`1644 passed, 1 skipped, 1 warning`。
+结果：`964 passed, 1 skipped, 1 warning`。
 
 唯一 warning 是既有 FastAPI TestClient 对 `httpx` 的 `StarletteDeprecationWarning`。
 
@@ -38,11 +38,11 @@ npx playwright test
 结果：
 
 - Vite production build：PASS。
-- Vitest：`31 passed` files，`68 passed` tests。
-- Playwright：`154 passed`，六 workers，无 retry。
-- Playwright 稳定性复验：`154 passed`，两 workers，`--retries=0`。
+- Vitest：`16 passed` files，`77 passed` tests。
+- Playwright：`155 passed`，六 workers，无 retry。
+- Playwright 稳定性复验：早期 154-test 集合以两 workers、`--retries=0` 全绿；新增文枢来源 gate 后最终集合 155 全绿。
 
-全量并发下 Vite dev server 曾随机留下半启动页面；同一 154-test 集合在 production preview 下连续干净通过。`playwright.config.ts` 因而让普通验收使用 fresh build + preview，`--ui` 继续使用 dev server/HMR。
+全量并发下 Vite dev server 曾随机留下半启动页面；同一集合在 production preview 下连续干净通过。`playwright.config.ts` 因而让普通验收使用 fresh build + preview，`--ui` 继续使用 dev server/HMR。
 
 ### Rust / Tauri
 
@@ -64,6 +64,15 @@ cargo check
 - 浏览器记录 `130` 个页面资源/API 请求，`0` 个 WebSocket，`0` 个禁止的上游请求。
 - 未访问 `api.openworker.com`、Cloud OAuth、Gallery、Relay 或 updater 地址。
 - 页面截图保存在工作站临时路径 `/tmp/wenshu-shell-card.png`。
+
+## 终审修复
+
+最终审查定位并修复两个 Important：
+
+1. `4ac0c1b`：产品 allowlist 前移到 gateway settings/profile 读取，并覆盖入站分发、effective connectors、Persona/Session views/recommends 与连接写路径；遗留隐藏凭据保留但不可见、不可启用、不可收消息。
+2. `381549b`：新会话来源卡由产品过滤后的 Connector catalog 驱动；文枢不再显示 HubSpot/GitHub/Slack，legacy OpenWorker 保留原 setup flow。
+
+两项 focused 复审均 Approved，无剩余 Critical/Important。
 
 ## 测试夹具修复原则
 

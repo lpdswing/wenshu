@@ -2,7 +2,7 @@
 
 ## Status
 
-后端全量回归通过：`1644 passed, 1 skipped`。测试夹具修复没有修改生产代码，也没有改变文枢默认产品行为。
+后端全量回归通过：`964 passed, 1 skipped`。Legacy 测试夹具修复不放宽生产配置；终审补充修复让网关、入站消息和连接视图也服从文枢产品 allowlist。
 
 ## Root cause
 
@@ -89,13 +89,24 @@ pytest: 17 passed, 1 warning in 13.73s
 
 唯一 warning 是既有 FastAPI TestClient 对 `httpx` 的 `StarletteDeprecationWarning`，与本修改无关。
 
+## Final review follow-up
+
+终审发现遗留手动 Slack/Telegram profile 仍可能启动本地 gateway adapter，并进入 effective/persona/session connection surface。`4ac0c1b` 完成以下收口：
+
+- `load_settings(..., platforms=visible)` 在读取隐藏 profile 之前按产品过滤，默认 `platforms=None` 保持 legacy 行为。
+- Gateway adapter 构造、入站缓冲/分发、effective connector、Persona/Session view 与 recommends 使用同一 `visible_connectors`。
+- Persona/Session connection POST 拒绝隐藏 connector，同时不迁移、不删除既有隐藏存储数据。
+- Legacy messaging tests 显式注入 `permissive_product`。
+
+原 finding 复审结论：Approved，无剩余 Critical/Important。
+
 ## Full backend acceptance
 
 ```text
 .venv/bin/pytest -q
 ```
 
-最终结果：`1644 passed, 1 skipped, 1 warning`。唯一 warning 仍是既有 FastAPI TestClient 对 `httpx` 的 `StarletteDeprecationWarning`。
+最终结果：`964 passed, 1 skipped, 1 warning`。唯一 warning 仍是既有 FastAPI TestClient 对 `httpx` 的 `StarletteDeprecationWarning`。
 
 ## Changed files
 
@@ -110,9 +121,18 @@ pytest: 17 passed, 1 warning in 13.73s
 - `tests/test_subscriptions.py`
 - `tests/test_team_allowlist.py`
 - `tests/test_ui_refresh_e2e.py`
+- `coworker/connectors/config.py`
+- `coworker/connectors/setup.py`
+- `coworker/server/app.py`
+- `coworker/server/manager.py`
+- `tests/test_dm_routing.py`
+- `tests/test_mention_router.py`
+- `tests/test_message_source.py`
+- `tests/test_persona_connections.py`
+- `tests/test_slack_relay.py`
 - `.superpowers/sdd/task-7-backend-report.md`
 
 ## Remaining risk
 
 - permissive fixture 的 Connector 集合会随 descriptor catalog 自动包含新增项；feature 集合则显式覆盖当前 ProductProfile 的五个 feature，未来新增 feature 时需要明确决定 legacy fixture 是否启用。
-- 未触碰生产 ProductProfile、Connector gate、Cloud/Relay/Gallery/managed OAuth 行为。
+- 产品 allowlist 现在覆盖工具注册、连接视图、写路径、gateway/profile 读取和入站分发；既有隐藏凭据保留在本地但不可见、不可启用、不可收发。
