@@ -62,9 +62,9 @@ const newId = () =>
   (crypto as any).randomUUID ? crypto.randomUUID().slice(0, 12) : Math.random().toString(36).slice(2, 14);
 
 const SUGGESTIONS = [
-  { ico: "⚙", text: "Run the test suite and summarize any failures." },
-  { ico: "✦", text: "Read the project and give me a 5-bullet overview." },
-  { ico: "↻", text: "Find and fix the failing build." },
+  { ico: "文", text: "整理这些资料，先生成一版文章草稿。" },
+  { ico: "图", text: "审阅文章后，为它规划封面和正文配图。" },
+  { ico: "微", text: "把确认后的文章整理成公众号草稿。" },
 ];
 
 // Tools whose success means a new/changed file should show up under Artifacts right away.
@@ -1453,11 +1453,7 @@ export function App() {
             <div className="main-scroll" ref={scrollRef} onScroll={handleScroll}>
               {idle ? (
                 agent === "cowork" ? (
-                  <SessionIntro
-                    sessionId={sessionId}
-                    onOpenSessionSettings={openAccess}
-                    onPrefill={prefillComposer}
-                  />
+                  <SessionIntro onPrefill={prefillComposer} />
                 ) : (
                   <div className="hero">
                     <h1 className="greeting">

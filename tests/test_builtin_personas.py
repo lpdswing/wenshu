@@ -36,6 +36,24 @@ def test_cowork_persona_matches_builder(tmp_path):
     assert a.messaging and a.connectors
 
 
+def test_default_persona_is_wenshu_content_assistant(tmp_path):
+    registry = PersonaRegistry(state_path=tmp_path / "personas.json")
+    row = next(persona for persona in registry.list_all() if persona["id"] == "cowork")
+    agent = registry.agent("cowork")
+
+    assert row["id"] == agent.name == "cowork"
+    assert row["name"] == agent.title == "文枢内容助手"
+    assert row["tagline"] == "整理资料、撰写文章并交付内容成果"
+    assert "资料" in agent.system_prompt
+    assert "公众号" in agent.system_prompt
+    # Future content/image/WeChat functions are intentionally described as a workflow, not
+    # advertised as concrete snake_case tools before those tools exist.
+    assert not any(
+        token in agent.system_prompt
+        for token in ("write_article", "generate_image", "create_wechat_draft")
+    )
+
+
 def test_ops_persona_composes_knowledge_toolset(tmp_path):
     reg = PersonaRegistry()
     ctx = _ctx(tmp_path)

@@ -117,14 +117,13 @@ class PersonaRegistry:
         )
 
     def _load_builtin(self, builtin_dir: Optional[str | Path]) -> None:
-        # Core surfaces keep their exact prompts via the existing builders. Cowork (the default)
-        # leads; Chat is hidden from the picker by default (Cowork covers quick Q&A) — recoverable
-        # from the Personas tab.
+        # Core surfaces keep their prompts via the existing builders. The Wenshu content
+        # assistant keeps the internal Cowork id; Chat remains recoverable from Personas.
         self._register_builder(
             "cowork",
-            "OpenWorker",
+            "文枢内容助手",
             "cowork",
-            "Produce a deliverable — research, analysis, scripts",
+            "整理资料、撰写文章并交付内容成果",
             cowork_agent,
             True,
             "knowledge",
