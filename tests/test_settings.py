@@ -130,29 +130,64 @@ def test_nav_layout_setting_roundtrips(tmp_path, monkeypatch):
     assert reborn.get_settings()["nav_layout"] == "grouped"
 
 
-def test_scratch_base_setting_persists_and_drives_provisioning(tmp_path, monkeypatch):
+def test_fresh_profile_defaults_scratch_to_wenshu(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     from coworker.server.app import create_app
     from coworker.server.manager import SessionManager
 
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("COWORKER_STATE_DIR", str(tmp_path / "state"))
+    manager = SessionManager(data_dir=tmp_path / "data")
+    client = TestClient(create_app(manager))
+
+    assert client.get("/v1/settings").json()["scratch_base"] == "~/WenShu"
+    assert manager.scratch_base() == home / "WenShu"
+
+
+def test_existing_legacy_scratch_directory_is_reused(tmp_path, monkeypatch):
+    from coworker.server.manager import SessionManager
+
+    home = tmp_path / "home"
+    legacy = home / "OpenWorker"
+    legacy.mkdir(parents=True)
+    sentinel = legacy / "keep.txt"
+    sentinel.write_text("existing work", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("COWORKER_STATE_DIR", str(tmp_path / "state"))
+    manager = SessionManager(data_dir=tmp_path / "data")
+
+    assert manager.get_settings()["scratch_base"] == "~/OpenWorker"
+    scratch = Path(manager._provision_scratch("legacy-session"))
+    assert scratch == (legacy / "legacy-session").resolve()
+    assert sentinel.read_text(encoding="utf-8") == "existing work"
+    assert not (home / "WenShu").exists()
+
+
+def test_explicit_scratch_base_persists_and_overrides_legacy(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from coworker.server.app import create_app
+    from coworker.server.manager import SessionManager
+
+    home = tmp_path / "home"
+    (home / "OpenWorker").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("COWORKER_STATE_DIR", str(tmp_path / "state"))
     data_dir = tmp_path / "data"
     client = TestClient(create_app(SessionManager(data_dir=data_dir)))
 
-    # defaults to ~/OpenWorker
-    assert client.get("/v1/settings").json()["scratch_base"] == "~/OpenWorker"
-
     base = tmp_path / "my coworker files"
     resp = client.post("/v1/settings/scratch-base", json={"path": str(base)}).json()
     assert resp["ok"] is True and resp["scratch_base"] == str(base)
-    assert base.is_dir()  # created on set
+    assert base.is_dir()
     assert (
         client.post("/v1/settings/scratch-base", json={"path": " "}).json()["ok"]
         is False
     )
 
-    # persists across a restart and actually drives where scratch dirs are provisioned
     reborn = SessionManager(data_dir=data_dir)
     assert reborn.get_settings()["scratch_base"] == str(base)
     scratch = reborn._provision_scratch("sess-xyz")

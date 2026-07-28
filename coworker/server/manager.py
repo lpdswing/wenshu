@@ -329,12 +329,21 @@ class SessionManager:
             out.append({"path": path, "name": p.name, "exists": p.is_dir()})
         return out
 
-    DEFAULT_SCRATCH_BASE = "~/OpenWorker"
+    DEFAULT_SCRATCH_BASE = "~/WenShu"
+    LEGACY_SCRATCH_BASE = "~/OpenWorker"
+
+    def _scratch_base_setting(self) -> str:
+        """Configured path, or a compatibility-safe default for an existing installation."""
+        configured = self._prefs.get("scratch_base")
+        if configured:
+            return str(configured)
+        if Path(self.LEGACY_SCRATCH_BASE).expanduser().is_dir():
+            return self.LEGACY_SCRATCH_BASE
+        return self.DEFAULT_SCRATCH_BASE
 
     def scratch_base(self) -> Path:
         """Common area for per-conversation scratch directories. Configurable via prefs."""
-        base = self._prefs.get("scratch_base") or self.DEFAULT_SCRATCH_BASE
-        return Path(base).expanduser()
+        return Path(self._scratch_base_setting()).expanduser()
 
     def _provision_scratch(self, session_id: str) -> str:
         """Create (idempotently) and return this conversation's scratch directory."""
@@ -1781,8 +1790,7 @@ class SessionManager:
             "surfaces": self._surfaces(),
             "nav_layout": self._nav_layout(),
             "sessions_peek": self.sessions_peek(),
-            "scratch_base": self._prefs.get("scratch_base")
-            or self.DEFAULT_SCRATCH_BASE,
+            "scratch_base": self._scratch_base_setting(),
             # Real on-disk secrets location, so the UI shows the OS-native path instead of a
             # hardcoded POSIX one (Windows -> %APPDATA%\coworker, macOS/Linux -> ~/.config).
             "secrets_path": str(self.secrets.path),
@@ -1921,8 +1929,9 @@ class SessionManager:
 
     def set_scratch_base(self, path: str) -> dict[str, Any]:
         """Set + persist the common area where each Cowork conversation's scratch directory is
-        created (default ~/OpenWorker). The raw value is stored so the UI shows it as entered;
-        new conversations use it immediately (existing ones keep their provisioned dir).
+        created (default ~/WenShu; existing ~/OpenWorker installs remain there). The raw value
+        is stored so the UI shows it as entered; new conversations use it immediately
+        (existing ones keep their provisioned dir).
         """
         path = (path or "").strip()
         if not path:
