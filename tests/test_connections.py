@@ -173,8 +173,10 @@ def test_delete_session_clears_overrides(tmp_path):
 
 
 # -- runtime gating: inbound ---------------------------------------------------
-def test_muted_connector_not_delivered(tmp_path, monkeypatch):
-    mgr = SessionManager(workspace=tmp_path, provider=ScriptedProvider())
+def test_muted_connector_not_delivered(tmp_path, monkeypatch, permissive_product):
+    mgr = SessionManager(
+        workspace=tmp_path, provider=ScriptedProvider(), product=permissive_product
+    )
     delivered: list[str] = []
 
     async def fake_deliver(session_id, message, *, source=None):
@@ -201,8 +203,10 @@ def test_muted_connector_not_delivered(tmp_path, monkeypatch):
     assert mgr.channel_buffer.recent("slack:C1")[-1]["text"] == "deploy failed"
 
 
-def test_dm_muted_session_not_delivered(tmp_path, monkeypatch):
-    mgr = SessionManager(workspace=tmp_path, provider=ScriptedProvider())
+def test_dm_muted_session_not_delivered(tmp_path, monkeypatch, permissive_product):
+    mgr = SessionManager(
+        workspace=tmp_path, provider=ScriptedProvider(), product=permissive_product
+    )
     delivered: list[str] = []
 
     async def fake_deliver(session_id, message, *, source=None):

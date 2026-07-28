@@ -411,17 +411,14 @@ def create_app(manager: SessionManager) -> FastAPI:
         connector = str(body.get("connector", "")).strip()
         if not connector:
             return {"ok": False, "error": "connector required"}
-        if body.get("clear"):
-            manager.session_connections.clear(session_id, connector)
-        else:
-            manager.session_connections.set(
-                session_id, connector, bool(body.get("enabled", False))
-            )
         persona = str(body.get("persona", "")) or None
-        return {
-            "ok": True,
-            "connections": manager.session_connections_view(session_id, persona),
-        }
+        return manager.set_session_connection(
+            session_id,
+            connector,
+            enabled=bool(body.get("enabled", False)),
+            clear=bool(body.get("clear")),
+            persona_id=persona,
+        )
 
     @app.post("/v1/personas/install")
     def install_persona(body: dict) -> dict[str, Any]:

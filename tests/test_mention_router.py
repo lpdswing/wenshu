@@ -73,8 +73,10 @@ def _plain_event(text="lunch anyone?", *, chat_id="C1", ts="1700000011.000200"):
     return ev
 
 
-def _mgr(tmp_path):
-    mgr = SessionManager(workspace=tmp_path, provider=CapturingProvider())
+def _mgr(tmp_path, product):
+    mgr = SessionManager(
+        workspace=tmp_path, provider=CapturingProvider(), product=product
+    )
     _connect_slack(mgr)
     return mgr
 
@@ -108,8 +110,10 @@ def test_slack_mapper_computes_mentions_me():
 # -- the router ---------------------------------------------------------------------
 
 
-def test_mention_spawns_visible_session_with_thread_grant(tmp_path, monkeypatch):
-    mgr = _mgr(tmp_path)
+def test_mention_spawns_visible_session_with_thread_grant(
+    tmp_path, monkeypatch, permissive_product
+):
+    mgr = _mgr(tmp_path, permissive_product)
     captured = _capture_deliveries(mgr, monkeypatch)
 
     asyncio.run(mgr._dispatch_inbound(_mention_event()))
@@ -135,8 +139,10 @@ def test_mention_spawns_visible_session_with_thread_grant(tmp_path, monkeypatch)
     assert source["connector"] == "slack" and source["kind"] == "channel"
 
 
-def test_followup_tag_steers_same_session(tmp_path, monkeypatch):
-    mgr = _mgr(tmp_path)
+def test_followup_tag_steers_same_session(
+    tmp_path, monkeypatch, permissive_product
+):
+    mgr = _mgr(tmp_path, permissive_product)
     captured = _capture_deliveries(mgr, monkeypatch)
 
     asyncio.run(mgr._dispatch_inbound(_mention_event()))
@@ -158,8 +164,10 @@ def test_followup_tag_steers_same_session(tmp_path, monkeypatch):
     assert "Follow-up" in message and "and staging too" in message
 
 
-def test_distinct_thread_spawns_distinct_session(tmp_path, monkeypatch):
-    mgr = _mgr(tmp_path)
+def test_distinct_thread_spawns_distinct_session(
+    tmp_path, monkeypatch, permissive_product
+):
+    mgr = _mgr(tmp_path, permissive_product)
     _capture_deliveries(mgr, monkeypatch)
 
     asyncio.run(mgr._dispatch_inbound(_mention_event()))
@@ -174,8 +182,10 @@ def test_distinct_thread_spawns_distinct_session(tmp_path, monkeypatch):
     assert len(mgr.list_sessions()) == 2
 
 
-def test_subscribed_coworker_overrides_router(tmp_path, monkeypatch):
-    mgr = _mgr(tmp_path)
+def test_subscribed_coworker_overrides_router(
+    tmp_path, monkeypatch, permissive_product
+):
+    mgr = _mgr(tmp_path, permissive_product)
     captured = _capture_deliveries(mgr, monkeypatch)
     mgr.subscriptions.subscribe("sA", "slack:C1")
 
@@ -192,8 +202,10 @@ def test_subscribed_coworker_overrides_router(tmp_path, monkeypatch):
     assert mgr.list_sessions() == []
 
 
-def test_grant_reseeds_on_engine_rebuild(tmp_path, monkeypatch):
-    mgr = _mgr(tmp_path)
+def test_grant_reseeds_on_engine_rebuild(
+    tmp_path, monkeypatch, permissive_product
+):
+    mgr = _mgr(tmp_path, permissive_product)
     _capture_deliveries(mgr, monkeypatch)
     asyncio.run(mgr._dispatch_inbound(_mention_event()))
     sid = mgr.list_sessions()[0]["session_id"]
@@ -204,8 +216,10 @@ def test_grant_reseeds_on_engine_rebuild(tmp_path, monkeypatch):
     assert target in engine.permissions.task_rules["send_message"]
 
 
-def test_deleted_session_releases_thread_and_respawns(tmp_path, monkeypatch):
-    mgr = _mgr(tmp_path)
+def test_deleted_session_releases_thread_and_respawns(
+    tmp_path, monkeypatch, permissive_product
+):
+    mgr = _mgr(tmp_path, permissive_product)
     _capture_deliveries(mgr, monkeypatch)
     asyncio.run(mgr._dispatch_inbound(_mention_event()))
     sid = mgr.list_sessions()[0]["session_id"]
@@ -218,9 +232,9 @@ def test_deleted_session_releases_thread_and_respawns(tmp_path, monkeypatch):
     assert len(fresh) == 1 and fresh[0]["session_id"] != sid
 
 
-def test_relay_team_qualified_target(tmp_path, monkeypatch):
+def test_relay_team_qualified_target(tmp_path, monkeypatch, permissive_product):
     """Managed relay chat_ids are 'T…/C…' — the '/' rides inside the ':'-delimited target."""
-    mgr = _mgr(tmp_path)
+    mgr = _mgr(tmp_path, permissive_product)
     _capture_deliveries(mgr, monkeypatch)
     asyncio.run(
         mgr._dispatch_inbound(
@@ -233,8 +247,10 @@ def test_relay_team_qualified_target(tmp_path, monkeypatch):
     assert listed["origin_label"] == "#general · T0AB"
 
 
-def test_untagged_channel_traffic_stays_judgement_only(tmp_path, monkeypatch):
-    mgr = _mgr(tmp_path)
+def test_untagged_channel_traffic_stays_judgement_only(
+    tmp_path, monkeypatch, permissive_product
+):
+    mgr = _mgr(tmp_path, permissive_product)
     captured = _capture_deliveries(mgr, monkeypatch)
     mgr.subscriptions.subscribe("sA", "slack:C1")
 

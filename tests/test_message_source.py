@@ -78,8 +78,12 @@ def _connect_slack(mgr):
     )
 
 
-def test_inbound_builds_message_source(tmp_path, monkeypatch):
-    mgr = SessionManager(workspace=tmp_path, provider=CapturingProvider([]))
+def test_inbound_builds_message_source(tmp_path, monkeypatch, permissive_product):
+    mgr = SessionManager(
+        workspace=tmp_path,
+        provider=CapturingProvider([]),
+        product=permissive_product,
+    )
     _connect_slack(mgr)
     captured: list[tuple] = []
 
@@ -108,9 +112,11 @@ def test_inbound_builds_message_source(tmp_path, monkeypatch):
     assert "subscribed" in message and "deploy failed" in message
 
 
-def test_message_source_persisted_and_stripped(tmp_path):
+def test_message_source_persisted_and_stripped(tmp_path, permissive_product):
     provider = CapturingProvider([_text("ack")])
-    mgr = SessionManager(workspace=tmp_path, provider=provider)
+    mgr = SessionManager(
+        workspace=tmp_path, provider=provider, product=permissive_product
+    )
     _connect_slack(mgr)
     mgr.get_engine("S", agent="chat")  # durable, workspace-free session
     mgr.subscriptions.subscribe("S", "slack:C1")
@@ -215,8 +221,12 @@ def test_tool_display_sidecar_is_agent_invisible(tmp_path):
     assert "2 result(s) hidden" in filtered[0]["reason"]
 
 
-def test_turn_start_carries_source(tmp_path):
-    mgr = SessionManager(workspace=tmp_path, provider=CapturingProvider([_text("ok")]))
+def test_turn_start_carries_source(tmp_path, permissive_product):
+    mgr = SessionManager(
+        workspace=tmp_path,
+        provider=CapturingProvider([_text("ok")]),
+        product=permissive_product,
+    )
     _connect_slack(mgr)
     mgr.get_engine("S", agent="chat")
     mgr.subscriptions.subscribe("S", "slack:C1")
@@ -239,8 +249,12 @@ def test_turn_start_carries_source(tmp_path):
     assert source["text"] == "deploy failed"
 
 
-def test_dm_message_source_kind_dm(tmp_path, monkeypatch):
-    mgr = SessionManager(workspace=tmp_path, provider=CapturingProvider([]))
+def test_dm_message_source_kind_dm(tmp_path, monkeypatch, permissive_product):
+    mgr = SessionManager(
+        workspace=tmp_path,
+        provider=CapturingProvider([]),
+        product=permissive_product,
+    )
     _connect_slack(mgr)
     captured: list[tuple] = []
 

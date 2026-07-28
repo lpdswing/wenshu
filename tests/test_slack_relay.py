@@ -16,7 +16,6 @@ from coworker.connectors.config import ConnectorSettings, load_settings
 from coworker.connectors.relay_client import SlackRelayAdapter
 from coworker.connectors.slack_addr import qualify, split
 from coworker.connectors.tools import make_send_message_tool
-from coworker.product import current_product
 from coworker.secrets import SecretStore
 from coworker.server import SessionManager
 
@@ -513,10 +512,57 @@ class _GatewayTestAdapter:
 
 
 @pytest.mark.asyncio
-async def test_gateway_skips_relay_profiles_when_feature_is_disabled(
+async def test_wenshu_gateway_skips_hidden_manual_profiles_before_read_or_adapter(
     tmp_path, monkeypatch
 ):
     manager = SessionManager(data_dir=tmp_path)
+    manager.secrets.put(
+        "slack:default",
+        {
+            "bot_token": "xoxb-preserved",
+            "app_token": "xapp-preserved",
+            "enabled": True,
+        },
+    )
+    manager.secrets.put(
+        "telegram:default", {"bot_token": "telegram-preserved", "enabled": True}
+    )
+    original_get = manager.secrets.get
+    profile_reads: list[str] = []
+    adapter_platforms: list[str] = []
+
+    def recording_get(profile):
+        profile_reads.append(profile)
+        return original_get(profile)
+
+    def recording_adapter(platform, _profile, **_kwargs):
+        adapter_platforms.append(platform)
+        return _GatewayTestAdapter(platform)
+
+    monkeypatch.setattr(manager.secrets, "get", recording_get)
+    monkeypatch.setattr("coworker.server.manager.make_adapter", recording_adapter)
+    try:
+        started = await manager.start_gateway()
+    finally:
+        await manager.aclose()
+
+    assert started == []
+    assert adapter_platforms == []
+    assert "slack:default" not in profile_reads
+    assert "telegram:default" not in profile_reads
+    assert original_get("slack:default")["bot_token"] == "xoxb-preserved"
+    assert original_get("telegram:default")["bot_token"] == "telegram-preserved"
+
+
+@pytest.mark.asyncio
+async def test_gateway_skips_relay_profiles_when_feature_is_disabled(
+    tmp_path, monkeypatch, permissive_product
+):
+    product = replace(
+        permissive_product,
+        features={**permissive_product.features, "relay": False},
+    )
+    manager = SessionManager(data_dir=tmp_path, product=product)
     manager.secrets.put("slack:default", {"mode": "relay", "enabled": True})
     manager.secrets.put(
         "telegram:default", {"bot_token": "manual-token", "enabled": True}
@@ -546,11 +592,13 @@ async def test_gateway_skips_relay_profiles_when_feature_is_disabled(
 
 
 @pytest.mark.asyncio
-async def test_gateway_starts_relay_for_an_enabled_product(tmp_path, monkeypatch):
+async def test_gateway_starts_relay_for_an_enabled_product(
+    tmp_path, monkeypatch, permissive_product
+):
     product = replace(
-        current_product(),
+        permissive_product,
         id="openworker",
-        features={**current_product().features, "relay": True},
+        features={**permissive_product.features, "relay": True},
     )
     manager = SessionManager(data_dir=tmp_path, product=product)
     manager.secrets.put("slack:default", {"mode": "relay", "enabled": True})

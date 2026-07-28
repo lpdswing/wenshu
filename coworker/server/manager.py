@@ -524,24 +524,9 @@ class SessionManager:
     def effective_connectors(
         self, session_id: str, persona_id: Optional[str] = None
     ) -> set[str]:
-        """The connectors effectively enabled for this session (§4.1): connected AND not muted by
-        the session override / persona default. Drives the engine's connector-tool gating; seeds the
-        persona defaults from the manifest on first read using the full connected set.
-        """
-        persona = self._persona_of(session_id, persona_id)
-        connected = {c["name"] for c in connector_list(self.secrets) if c["connected"]}
-        entry = self.personas.get(persona)
-        manifest = entry.manifest if entry else None
-        persona_defaults = self.persona_connections.defaults_for(
-            persona, manifest, connected=connected
-        )
-        session_overrides = self.session_connections.get(session_id)
-        return set(
-            effective_connections(
-                connected=connected,
-                persona_defaults=persona_defaults,
-                session_overrides=session_overrides,
-            )
+        """Product-visible connectors effectively enabled for this session (§4.1)."""
+        return self._resolve_effective_connectors(
+            session_id, persona_id, self._connected_connectors()
         )
 
     def _inbound_connector_allowed(self, session_id: str, connector: str) -> bool:
@@ -566,9 +551,49 @@ class SessionManager:
             return "none"
         return "git" if entry.family == "code" else "deliverable"
 
+    def _product_connector_rows(self) -> list[dict[str, Any]]:
+        """Connector metadata scoped before any credential-backed profile is inspected."""
+        return connector_list(
+            self.secrets, platforms=self.product.visible_connectors
+        )
+
     def _connected_connectors(self) -> set[str]:
-        """The account-connected connector names (the first layer of the §4 hierarchy)."""
-        return {c["name"] for c in connector_list(self.secrets) if c["connected"]}
+        """Product-visible, account-connected connector names (layer one of §4)."""
+        return {
+            connector["name"]
+            for connector in self._product_connector_rows()
+            if connector["connected"]
+        }
+
+    def _resolve_effective_connectors(
+        self,
+        session_id: str,
+        persona_id: Optional[str],
+        connected: set[str],
+    ) -> set[str]:
+        persona = self._persona_of(session_id, persona_id)
+        entry = self.personas.get(persona)
+        manifest = entry.manifest if entry else None
+        visible = self.product.visible_connectors
+        persona_defaults = {
+            connector: enabled
+            for connector, enabled in self.persona_connections.defaults_for(
+                persona, manifest, connected=connected
+            ).items()
+            if connector in visible
+        }
+        session_overrides = {
+            connector: enabled
+            for connector, enabled in self.session_connections.get(session_id).items()
+            if connector in visible
+        }
+        return set(
+            effective_connections(
+                connected=connected,
+                persona_defaults=persona_defaults,
+                session_overrides=session_overrides,
+            )
+        )
 
     def _persona_default_connections(
         self, persona_id: str, manifest, connected: set[str]
@@ -582,6 +607,7 @@ class SessionManager:
         return [
             {"connector": c, "enabled": bool(enabled), "connected": c in connected}
             for c, enabled in defaults.items()
+            if c in self.product.visible_connectors
         ]
 
     def persona_detail(self, persona_id: str) -> Optional[dict[str, Any]]:
@@ -602,6 +628,8 @@ class SessionManager:
                 "connected": rec.ref in connected,
             }
             for rec in (manifest.recommends if manifest else [])
+            if rec.kind != "connector"
+            or rec.ref in self.product.visible_connectors
         ]
         return {
             "id": entry.id,
@@ -629,6 +657,11 @@ class SessionManager:
         first so the stored row stays complete (the edit overlays the full seed rather than
         collapsing the row to this one connector), then returns the refreshed default_connections
         so the client can re-render without a second GET."""
+        if connector not in self.product.visible_connectors:
+            return {
+                "ok": False,
+                "error": f"connector not available in this product: {connector}",
+            }
         entry = self.personas.get(persona_id)
         if entry is None:
             return {"ok": False, "error": f"unknown persona: {persona_id}"}
@@ -698,10 +731,12 @@ class SessionManager:
         persona = self._persona_of(session_id, persona_id)
         entry = self.personas.get(persona)
         manifest = entry.manifest if entry else None
-        connectors = connector_list(self.secrets)
+        connectors = self._product_connector_rows()
         by_name = {c["name"]: c for c in connectors}
         connected_names = {c["name"] for c in connectors if c["connected"]}
-        effective = self.effective_connectors(session_id, persona)
+        effective = self._resolve_effective_connectors(
+            session_id, persona, connected_names
+        )
         connected = [
             {
                 "connector": name,
@@ -718,12 +753,38 @@ class SessionManager:
                 "connected": False,
             }
             for rec in (manifest.recommends if manifest else [])
-            if rec.kind == "connector" and rec.ref not in connected_names
+            if rec.kind == "connector"
+            and rec.ref in self.product.visible_connectors
+            and rec.ref not in connected_names
         ]
         return {
             "connected": connected,
             "recommended": recommended,
             "attention": sum(1 for r in recommended if not r["connected"]),
+        }
+
+    def set_session_connection(
+        self,
+        session_id: str,
+        connector: str,
+        *,
+        enabled: bool,
+        clear: bool = False,
+        persona_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Apply one product-visible session override and return the refreshed view."""
+        if connector not in self.product.visible_connectors:
+            return {
+                "ok": False,
+                "error": f"connector not available in this product: {connector}",
+            }
+        if clear:
+            self.session_connections.clear(session_id, connector)
+        else:
+            self.session_connections.set(session_id, connector, bool(enabled))
+        return {
+            "ok": True,
+            "connections": self.session_connections_view(session_id, persona_id),
         }
 
     def inbox_question_asker(self, session_id: str, agent: str):
@@ -1114,7 +1175,7 @@ class SessionManager:
     def list_connectors(self) -> list[dict[str, Any]]:
         # Enrich two-way connectors with the live gateway's recently-seen senders, so the Connectors
         # tab can manage the allow-list inline (each recent sender flagged authorized or not).
-        connectors = connector_list(self.secrets)
+        connectors = self._product_connector_rows()
         for c in connectors:
             if not (c.get("two_way") and c.get("connected")):
                 continue
@@ -1155,11 +1216,7 @@ class SessionManager:
                     u: self._people.get(f"{c['name']}:{u}")
                     for u in (w.get("approval_owner_ids") or [])
                 }
-        return [
-            connector
-            for connector in connectors
-            if connector["name"] in self.product.visible_connectors
-        ]
+        return connectors
 
     def connect_connector(
         self, name: str, fields: dict[str, Any], *, acknowledged: bool = False
@@ -2293,7 +2350,9 @@ class SessionManager:
         return started
 
     async def _build_and_start_gateway(self) -> list[str]:
-        settings = load_settings(self.secrets)
+        settings = load_settings(
+            self.secrets, platforms=self.product.visible_connectors
+        )
         self.gateway = Gateway(
             secrets=self.secrets,
             settings=settings,
@@ -2820,6 +2879,8 @@ class SessionManager:
         DM session (delivered like any background turn) or, if none is set, is parked as unrouted.
         """
         src = event.source
+        if src.platform not in self.product.visible_connectors:
+            return
         text = getattr(event, "text", "") or ""
         who = src.user_name or src.user_id or "?"
         channel = f"{src.platform}:{src.chat_id}"  # thread-agnostic channel address

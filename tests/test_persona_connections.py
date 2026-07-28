@@ -5,9 +5,12 @@ endpoints, exercised through ``TestClient(create_app(mgr))`` per the verificatio
 are "connected" by writing their secret profile directly (no network); ``browser`` is always
 connected (auth="none"), so effective-set assertions use subsets, not exact equality.
 """
+import asyncio
 
 from fastapi.testclient import TestClient
 
+from coworker.connectors.base import MessageEvent, SessionSource
+from coworker.product import current_product
 from coworker.providers import ModelCapabilities, ProviderClient
 from coworker.server import create_app
 from coworker.server.manager import SessionManager
@@ -25,11 +28,17 @@ class ScriptedProvider(ProviderClient):
         return ModelCapabilities()
 
 
-def _mgr(tmp_path, monkeypatch) -> SessionManager:
+def _mgr(tmp_path, monkeypatch, product) -> SessionManager:
     # Isolate the SecretStore (which is otherwise the machine-global state dir) so a connector the
     # developer happens to have connected locally can't leak into "is it connected?" assertions.
     monkeypatch.setenv("COWORKER_STATE_DIR", str(tmp_path / "state"))
-    return SessionManager(workspace=tmp_path, provider=ScriptedProvider([]))
+    return SessionManager(
+        workspace=tmp_path, provider=ScriptedProvider([]), product=product
+    )
+
+
+def _wenshu_mgr(tmp_path, monkeypatch) -> SessionManager:
+    return _mgr(tmp_path, monkeypatch, current_product())
 
 
 def _connect_github(mgr) -> None:
@@ -56,8 +65,8 @@ def _ops_session(mgr, session_id: str) -> None:
 
 
 # -- §5 persona detail ---------------------------------------------------------
-def test_persona_detail_endpoint(tmp_path, monkeypatch):
-    mgr = _mgr(tmp_path, monkeypatch)
+def test_persona_detail_endpoint(tmp_path, monkeypatch, permissive_product):
+    mgr = _mgr(tmp_path, monkeypatch, permissive_product)
     _connect_github(mgr)  # so a core recommend shows connected
     client = TestClient(create_app(mgr))
 
@@ -96,8 +105,8 @@ def test_persona_detail_endpoint(tmp_path, monkeypatch):
     }
 
 
-def test_persona_set_default_connection(tmp_path, monkeypatch):
-    mgr = _mgr(tmp_path, monkeypatch)
+def test_persona_set_default_connection(tmp_path, monkeypatch, permissive_product):
+    mgr = _mgr(tmp_path, monkeypatch, permissive_product)
     _connect_github(mgr)
     _connect_slack(mgr)
     client = TestClient(create_app(mgr))
@@ -126,8 +135,8 @@ def test_persona_set_default_connection(tmp_path, monkeypatch):
     assert "slack" in eff  # slack default unchanged → still effective
 
 
-def test_persona_enable_toggle(tmp_path, monkeypatch):
-    mgr = _mgr(tmp_path, monkeypatch)
+def test_persona_enable_toggle(tmp_path, monkeypatch, permissive_product):
+    mgr = _mgr(tmp_path, monkeypatch, permissive_product)
     client = TestClient(create_app(mgr))
 
     before = {p["id"]: p for p in client.get("/v1/personas").json()["personas"]}
@@ -157,8 +166,8 @@ def test_persona_enable_toggle(tmp_path, monkeypatch):
 
 
 # -- §6 per-session connections ------------------------------------------------
-def test_session_connections_endpoint(tmp_path, monkeypatch):
-    mgr = _mgr(tmp_path, monkeypatch)
+def test_session_connections_endpoint(tmp_path, monkeypatch, permissive_product):
+    mgr = _mgr(tmp_path, monkeypatch, permissive_product)
     _connect_github(mgr)
     _connect_slack(mgr)
     _ops_session(mgr, "incident")
@@ -182,11 +191,13 @@ def test_session_connections_endpoint(tmp_path, monkeypatch):
     assert view["attention"] == 2
 
 
-def test_fresh_session_view_uses_persona_hint(tmp_path, monkeypatch):
+def test_fresh_session_view_uses_persona_hint(
+    tmp_path, monkeypatch, permissive_product
+):
     # A brand-new session has no SessionRecord until its first turn persists. Without the
     # GUI's persona hint the view resolved to the DEFAULT persona (cowork) — the owner's
     # 2026-07-03 finding: a fresh session showed the wrong defaults and no recommends.
-    mgr = _mgr(tmp_path, monkeypatch)
+    mgr = _mgr(tmp_path, monkeypatch, permissive_product)
     _connect_slack(mgr)
     # ops persona default: slack OFF (user's "New sessions get by default" choice)
     mgr.persona_connections.defaults_for(
@@ -207,8 +218,8 @@ def test_fresh_session_view_uses_persona_hint(tmp_path, monkeypatch):
     ] is True
 
 
-def test_session_set_override(tmp_path, monkeypatch):
-    mgr = _mgr(tmp_path, monkeypatch)
+def test_session_set_override(tmp_path, monkeypatch, permissive_product):
+    mgr = _mgr(tmp_path, monkeypatch, permissive_product)
     _connect_slack(mgr)
     _connect_github(mgr)
     _ops_session(mgr, "s1")
@@ -247,3 +258,129 @@ def test_session_set_override(tmp_path, monkeypatch):
     assert mgr.session_connections.get("s1") == {}
     assert "slack" in mgr.effective_connectors("s1", "ops")
     assert "slack" in {c["connector"] for c in resp2["connections"]["connected"]}
+
+
+# -- product-scoped connection gates -------------------------------------------
+def test_wenshu_filters_stored_hidden_connectors_from_connection_views(
+    tmp_path, monkeypatch
+):
+    mgr = _wenshu_mgr(tmp_path, monkeypatch)
+    _connect_github(mgr)
+    _connect_slack(mgr)
+    _ops_session(mgr, "incident")
+    mgr.persona_connections.set("ops", "slack", True)
+    mgr.session_connections.set("incident", "slack", True)
+
+    assert "slack" not in mgr.effective_connectors("incident", "ops")
+
+    detail = mgr.persona_detail("ops")
+    assert detail is not None
+    assert {
+        rec["ref"] for rec in detail["recommends"] if rec["kind"] == "connector"
+    } == set()
+    assert any(
+        rec["kind"] == "mcp" and rec["ref"] == "filesystem"
+        for rec in detail["recommends"]
+    )
+    assert detail["default_connections"] == []
+
+    view = mgr.session_connections_view("incident", "ops")
+    assert {row["connector"] for row in view["connected"]} <= {
+        "browser",
+        "wechat_official",
+    }
+    assert view["recommended"] == []
+    assert view["attention"] == 0
+
+    # Product filtering is a read-time seam: hidden user data remains intact.
+    assert mgr.persona_connections.get("ops") == {"slack": True}
+    assert mgr.session_connections.get("incident") == {"slack": True}
+
+
+def test_wenshu_rejects_hidden_connection_writes_without_mutating_stored_overrides(
+    tmp_path, monkeypatch
+):
+    mgr = _wenshu_mgr(tmp_path, monkeypatch)
+    mgr.persona_connections.set("ops", "slack", True)
+    mgr.session_connections.set("existing", "slack", True)
+    client = TestClient(create_app(mgr))
+    unavailable = {
+        "ok": False,
+        "error": "connector not available in this product: slack",
+    }
+
+    persona = client.post(
+        "/v1/personas/ops/connections",
+        json={"connector": "slack", "enabled": False},
+    )
+    assert persona.status_code == 200
+    assert persona.json() == unavailable
+    assert mgr.persona_connections.get("ops") == {"slack": True}
+
+    set_response = client.post(
+        "/v1/sessions/new/connections",
+        json={"connector": "slack", "enabled": True, "persona": "ops"},
+    )
+    assert set_response.status_code == 200
+    assert set_response.json() == unavailable
+    assert mgr.session_connections.get("new") == {}
+
+    clear_response = client.post(
+        "/v1/sessions/existing/connections",
+        json={"connector": "slack", "clear": True, "persona": "ops"},
+    )
+    assert clear_response.status_code == 200
+    assert clear_response.json() == unavailable
+    assert mgr.session_connections.get("existing") == {"slack": True}
+
+
+def test_wenshu_rejects_hidden_inbound_before_buffering_or_delivery(
+    tmp_path, monkeypatch
+):
+    mgr = _wenshu_mgr(tmp_path, monkeypatch)
+    _connect_slack(mgr)
+    mgr.subscriptions.subscribe("incident", "slack:C1")
+    mgr.session_connections.set("incident", "slack", True)
+    delivered: list[str] = []
+
+    async def capture(session_id, _message, *, source=None):
+        delivered.append(session_id)
+
+    monkeypatch.setattr(mgr, "deliver_to_session", capture)
+    event = MessageEvent(
+        text="hidden inbound",
+        source=SessionSource(
+            platform="slack",
+            chat_id="C1",
+            user_id="U1",
+            user_name="Alice",
+            chat_type="channel",
+        ),
+    )
+
+    asyncio.run(mgr._dispatch_inbound(event))
+
+    assert delivered == []
+    assert mgr.channel_buffer.recent("slack:C1") == []
+    assert mgr.session_connections.get("incident") == {"slack": True}
+
+
+def test_wenshu_connection_seam_does_not_read_hidden_profiles(
+    tmp_path, monkeypatch
+):
+    mgr = _wenshu_mgr(tmp_path, monkeypatch)
+    _connect_slack(mgr)
+    original_get = mgr.secrets.get
+    profile_reads: list[str] = []
+
+    def recording_get(profile):
+        profile_reads.append(profile)
+        return original_get(profile)
+
+    monkeypatch.setattr(mgr.secrets, "get", recording_get)
+
+    mgr.effective_connectors("incident", "ops")
+    mgr.persona_detail("ops")
+    mgr.session_connections_view("incident", "ops")
+
+    assert "slack:default" not in profile_reads

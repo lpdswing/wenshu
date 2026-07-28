@@ -147,8 +147,14 @@ def _connect_slack(mgr):
     )
 
 
-def test_dispatch_fans_out_to_subscribers(tmp_path, monkeypatch):
-    mgr = SessionManager(workspace=tmp_path, provider=ScriptedProvider([]))
+def test_dispatch_fans_out_to_subscribers(
+    tmp_path, monkeypatch, permissive_product
+):
+    mgr = SessionManager(
+        workspace=tmp_path,
+        provider=ScriptedProvider([]),
+        product=permissive_product,
+    )
     _connect_slack(mgr)
     delivered: list[tuple[str, str]] = []
 

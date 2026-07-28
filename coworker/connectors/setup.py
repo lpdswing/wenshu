@@ -7,7 +7,7 @@ public bot identity captured at connect time.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterable
 
 from ..secrets import SecretStore
 from .catalog_copy import about_for, access_for
@@ -51,10 +51,18 @@ def _mcp_tokens_present(secrets: SecretStore, name: str) -> bool:
     return has_tokens(name, secrets)
 
 
-def connector_list(secrets: SecretStore) -> list[dict[str, Any]]:
-    show_experimental = experimental_enabled(secrets)
+def connector_list(
+    secrets: SecretStore, *, platforms: Iterable[str] | None = None
+) -> list[dict[str, Any]]:
+    descriptors = list_descriptors()
+    if platforms is not None:
+        allowed = frozenset(platforms)
+        descriptors = [descriptor for descriptor in descriptors if descriptor.name in allowed]
+    show_experimental = any(d.experimental for d in descriptors) and experimental_enabled(
+        secrets
+    )
     out: list[dict[str, Any]] = []
-    for d in list_descriptors():
+    for d in descriptors:
         # Experimental connectors are invisible (not just disabled) until the user opts in;
         # hiding them here also drops their tools from engine builds via
         # _enabled_connector_tools, so flipping the setting off cuts access immediately.
