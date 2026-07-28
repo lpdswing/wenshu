@@ -23,7 +23,7 @@ test("WenShu hides Cloud account entry points without polling Cloud", async ({ p
   const menu = page.getByTestId("account-menu");
   await expect(menu.getByTestId("account-sign-in")).toHaveCount(0);
   await expect(menu).not.toContainText("OpenWorker Cloud");
-  await expect(menu.getByRole("button", { name: "Connectors", exact: true })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "连接器", exact: true })).toBeVisible();
   expect(featureRequests).toEqual([]);
 });
 
@@ -32,8 +32,8 @@ test("WenShu onboarding hides Cloud sign-in and managed OAuth entry points", asy
 
   await page.goto("/");
   await page.getByTestId("account-row").click();
-  await page.getByTestId("account-menu").getByRole("button", { name: "Settings" }).click();
-  await page.getByRole("button", { name: "Run setup again" }).click();
+  await page.getByTestId("account-menu").getByRole("button", { name: "设置" }).click();
+  await page.getByRole("button", { name: "重新运行设置" }).click();
   await page.getByTestId("ob-continue").click();
 
   await expect(page.getByTestId("ob-step-tools")).toBeVisible();
@@ -52,7 +52,7 @@ test("WenShu automations stay local without managed templates or Cloud polling",
   await page.getByTestId("account-row").click();
   await page
     .getByTestId("account-menu")
-    .getByRole("button", { name: "Automations", exact: true })
+    .getByRole("button", { name: "自动化", exact: true })
     .click();
   await page.getByRole("button", { name: "+ New automation" }).click();
 

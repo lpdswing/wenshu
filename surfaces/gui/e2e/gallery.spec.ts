@@ -5,8 +5,8 @@ async function openPersonas(page: Page) {
   await page.addInitScript(() => localStorage.setItem("ocw.flag.personas", "1"));
   await page.goto("/");
   await page.getByTestId("account-row").click();
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Personas", exact: true }).click();
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await page.getByRole("button", { name: "角色", exact: true }).click();
 }
 
 test("WenShu hides Gallery without requesting Cloud gallery endpoints", async ({ page }) => {

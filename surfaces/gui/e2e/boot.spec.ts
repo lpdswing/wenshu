@@ -3,7 +3,7 @@
 // model picker recovers when the mount-time settings fetch loses the race against the
 // sidecar boot — previously "Loading models…" stuck until the user visited Settings.
 import { expect } from "@playwright/test";
-import { test } from "./fixtures";
+import { wenshuTest as test } from "./fixtures";
 
 test("uses the Wenshu product title", async ({ page }) => {
   await page.goto("/");
@@ -21,7 +21,7 @@ test("boot splash shows the Wenshu star, not the sparkle glyph", async ({ page }
   await expect(mark).toBeVisible();
   await expect(mark.locator("svg")).toBeVisible(); // the Icon logo, not a text glyph
   await expect(mark).not.toContainText("✦");
-  await expect(page.getByText(/Starting 文枢|Restoring your session/)).toBeVisible();
+  await expect(page.getByText(/正在启动文枢|正在恢复会话/)).toBeVisible();
 });
 
 test("model picker recovers when settings fetches die during sidecar boot", async ({ page }) => {
