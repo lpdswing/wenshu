@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures";
+import { wenshuTest as test, expect } from "./fixtures";
 
 // Sidebar session lifecycle (owner testing pass, 2026-07-03): the peek cap (sessions_peek=5 →
 // "Show more (2)" with 7 sessions), reversible archive with the Archived disclosure, and the
@@ -13,7 +13,7 @@ test("session list caps at the peek count with Show more", async ({ page }) => {
   await expect(page.getByTitle("Weekly plan 5")).toBeVisible();
   await expect(page.getByTitle("Weekly plan 6")).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Show more (3)" }).click();
+  await page.getByRole("button", { name: "显示更多（3）" }).click();
   await expect(page.getByTitle("Weekly plan 6")).toBeVisible();
   await expect(page.getByTitle("Weekly plan 7")).toBeVisible();
 });
@@ -29,7 +29,7 @@ test("archive via the row menu is reversible via the Archived disclosure", async
 
   // Gone from the main list; parked under the Archived disclosure.
   await expect(page.getByTitle("Weekly plan 2")).toHaveCount(0);
-  await page.getByRole("button", { name: /Archived \(1\)/ }).click();
+  await page.getByRole("button", { name: /已归档（1）/ }).click();
   const archivedRow = page.getByTitle("Weekly plan 2");
   await expect(archivedRow).toBeVisible();
 
@@ -37,9 +37,9 @@ test("archive via the row menu is reversible via the Archived disclosure", async
   // disappears with its last item.
   await archivedRow.hover();
   await archivedRow.getByTestId("row-menu").click();
-  await expect(archivedRow.getByTestId("row-menu-archive")).toHaveText("Unarchive");
+  await expect(archivedRow.getByTestId("row-menu-archive")).toHaveText("取消归档");
   await archivedRow.getByTestId("row-menu-archive").click();
-  await expect(page.getByRole("button", { name: /Archived/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /已归档/ })).toHaveCount(0);
   await expect(page.getByTitle("Weekly plan 2")).toBeVisible();
 });
 
@@ -54,7 +54,7 @@ test("mention-spawned sessions list in Recent with the platform icon — no From
   // No collapsed band; the session sits directly in Recent, exactly once (its fixture
   // timestamp sorts it past the peek cap, so expand first)…
   await expect(page.getByTestId("from-slack-toggle")).toHaveCount(0);
-  await page.getByText(/Show \d+ more/).click();
+  await page.getByText(/再显示 \d+ 个/).click();
   const row = page.getByTitle("#general — check the deploy?");
   await expect(row).toBeVisible();
   await expect(page.getByTitle("#general — check the deploy?")).toHaveCount(1);
@@ -69,18 +69,18 @@ test("pin via the row menu moves the session to the Pinned band and back", async
 
   await row.hover();
   await row.getByTestId("row-menu").click();
-  await expect(row.getByTestId("row-menu-pin")).toHaveText("Pin");
+  await expect(row.getByTestId("row-menu-pin")).toHaveText("置顶");
   await row.getByTestId("row-menu-pin").click();
 
   // Pinned rows live ONLY in the cross-persona Pinned band — no duplicate in the body.
-  const pinnedBand = page.getByText("Pinned", { exact: true }).locator("..");
+  const pinnedBand = page.getByText("置顶", { exact: true }).locator("..");
   await expect(pinnedBand.getByTitle("Weekly plan 4")).toBeVisible();
   await expect(page.getByTitle("Weekly plan 4")).toHaveCount(1);
 
   const pinnedRow = pinnedBand.getByTitle("Weekly plan 4");
   await pinnedRow.hover();
   await pinnedRow.getByTestId("row-menu").click();
-  await expect(pinnedRow.getByTestId("row-menu-pin")).toHaveText("Unpin");
+  await expect(pinnedRow.getByTestId("row-menu-pin")).toHaveText("取消置顶");
   await pinnedRow.getByTestId("row-menu-pin").click();
   await expect(pinnedBand.getByTitle("Weekly plan 4")).toHaveCount(0);
   await expect(page.getByTitle("Weekly plan 4")).toHaveCount(1);
@@ -95,7 +95,7 @@ test("delete is two-step: the menu's Delete arms, Delete? confirms", async ({ pa
   await row.getByTestId("row-menu").click();
   await row.getByTestId("row-menu-delete").click();
   // First click only ARMS — the menu stays open showing the confirm affordance, the row remains.
-  await expect(row.getByTestId("row-menu-delete")).toHaveText("Delete?");
+  await expect(row.getByTestId("row-menu-delete")).toHaveText("确认删除？");
   await expect(page.getByTitle("Weekly plan 3")).toHaveCount(1);
 
   await row.getByTestId("row-menu-delete").click();

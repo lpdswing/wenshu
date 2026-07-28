@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures";
+import { test as legacyTest, wenshuTest as test, expect } from "./fixtures";
 
 // The Inbox (owner testing pass, 2026-07-03; §28 two-tab split 2026-07-12): Pending holds the
 // kind chips (All/Approvals/Questions), persona filter chips (only with >1 persona holding
@@ -38,7 +38,7 @@ test("kind + persona filters narrow the pending list", async ({ page }) => {
 test("resolving an approval removes its card; question options resolve on click", async ({ page }) => {
   await openInbox(page);
 
-  await page.getByRole("button", { name: "Approve", exact: true }).click();
+  await page.getByRole("button", { name: "批准", exact: true }).click();
   await expect(page.getByText("Approve: run_shell")).not.toBeVisible();
 
   // Single-select question: clicking an option resolves immediately.
@@ -47,7 +47,7 @@ test("resolving an approval removes its card; question options resolve on click"
   await expect(page.getByText("Nothing pending.")).toBeVisible();
 });
 
-test("routing: Configure tab binds the mirror channel; Pending's status line follows", async ({
+legacyTest("routing: Configure tab binds the mirror channel; Pending's status line follows", async ({
   page,
 }) => {
   await openInbox(page);
