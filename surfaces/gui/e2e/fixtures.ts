@@ -395,7 +395,7 @@ const baseName = (p: string) => p.split("/").filter(Boolean).pop() || p;
 
 const PROVIDERS = [
   // openai: configured + used (drives the "Last used" sub-line and the status dot).
-  { name: "openai", title: "OpenAI", needs_key: true, fields: [{ key: "api_key", label: "OpenAI API key", secret: true, required: true, help: "", placeholder: "sk-…" }], configured: true, values: {}, suggested_models: ["gpt-5.5"], key_set_at: "2026-06-12", last_used_at: Math.floor(Date.now() / 1000) - 7200 },
+  { name: "openai", title: "OpenAI", needs_key: true, fields: [{ key: "api_key", label: "OpenAI API key", secret: true, required: true, help: "", placeholder: "sk-…" }, { key: "image_model", label: "图片模型", secret: false, required: false, help: "用于封面和正文配图，与对话模型分开设置；也可输入自定义模型 ID。", placeholder: "", default: "gpt-image-2", options: ["gpt-image-2", "gpt-image-1.5", "gpt-image-1"] }], configured: true, values: {}, image_model: "gpt-image-2", suggested_models: ["gpt-5.5"], key_set_at: "2026-06-12", last_used_at: Math.floor(Date.now() / 1000) - 7200 },
   // anthropic: configured but never used ("Not used yet").
   { name: "anthropic", title: "Claude (Anthropic)", needs_key: true, fields: [{ key: "api_key", label: "API key", secret: true, required: true, help: "", placeholder: "sk-…" }], configured: true, values: {}, suggested_models: ["claude-opus-4-8"], key_set_at: null, last_used_at: null },
   // zai: an OpenAI-compatible vendor — unconfigured, with a prefilled editable endpoint + blurb.

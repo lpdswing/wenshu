@@ -209,3 +209,40 @@ def test_ollama_models_gated_on_liveness(tmp_path, monkeypatch):
 
     monkeypatch.setattr(SessionManager, "_ollama_alive", lambda self: True)
     assert "ollama:llama3.3" in manager.get_settings()["models"]
+
+
+def test_openai_image_model_round_trip_without_key_leak(tmp_path, monkeypatch):
+    from coworker.server.manager import SessionManager
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("COWORKER_STATE_DIR", str(tmp_path / "state"))
+    manager = SessionManager(data_dir=tmp_path / "data")
+
+    result = manager.set_provider(
+        "openai", {"api_key": "sk-secret", "image_model": "gpt-image-2"}
+    )
+    row = next(provider for provider in manager.get_providers() if provider["name"] == "openai")
+
+    assert result["ok"] is True
+    assert row["configured"] is True
+    assert row["image_model"] == "gpt-image-2"
+    assert row["values"]["image_model"] == "gpt-image-2"
+    assert "sk-secret" not in repr(row)
+
+
+def test_openai_image_model_defaults_and_rejects_invalid_ids(tmp_path, monkeypatch):
+    from coworker.server.manager import SessionManager
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("COWORKER_STATE_DIR", str(tmp_path / "state"))
+    manager = SessionManager(data_dir=tmp_path / "data")
+
+    before = next(provider for provider in manager.get_providers() if provider["name"] == "openai")
+    assert before["image_model"] == "gpt-image-2"
+    assert manager.set_provider(
+        "openai", {"api_key": "sk-secret", "image_model": "custom-image:v2"}
+    )["ok"]
+    rejected = manager.set_provider("openai", {"image_model": "bad model\nid"})
+    assert rejected["ok"] is False
+    row = next(provider for provider in manager.get_providers() if provider["name"] == "openai")
+    assert row["image_model"] == "custom-image:v2"

@@ -1275,6 +1275,7 @@ export interface ProviderField {
   help: string;
   placeholder: string;
   default?: string; // pre-filled editable value (e.g. an OpenAI-compatible vendor's endpoint)
+  options?: string[]; // suggested values; the text field still accepts a custom id
 }
 
 export interface ProviderInfo {
@@ -1287,6 +1288,7 @@ export interface ProviderInfo {
   suggested_models: string[]; // bare model-name suggestions for the "add model" datalist
   recommended_model: string | null; // pre-filled default for this provider (e.g. qwen3-coder:30b)
   blurb?: string; // one-line note under the title ("Uses X's OpenAI-compatible API…")
+  image_model?: string; // effective image model; independent of the chat model
   key_set_at?: string | null; // ISO date the key was last (re)saved — absent for env-only config
   last_used_at?: number | null; // epoch secs the provider last served a completion
 }

@@ -69,3 +69,24 @@ test("non-secret fields blur-save on a configured provider (ollama endpoint)", a
   await page.getByTestId("set-provider-ollama").click();
   await expect(page.getByTestId("set-field-base_url")).toHaveValue("http://127.0.0.1:9999");
 });
+
+test("OpenAI image model is separate from chat models and persists custom ids", async ({
+  page,
+}) => {
+  await openModels(page);
+  await page.getByTestId("set-provider-openai").click();
+
+  const imageModel = page.getByTestId("set-field-image_model");
+  await expect(imageModel).toHaveValue("gpt-image-2");
+  await expect(imageModel).toHaveAttribute("list", "set-options-image_model");
+  await expect(page.getByTestId("set-field-api_key")).toHaveValue("");
+
+  await imageModel.fill("custom-image:v2");
+  await imageModel.blur();
+  await expect(page.getByTestId("set-field-saved-image_model")).toBeVisible();
+
+  await page.getByTestId("set-back").click();
+  await page.getByTestId("set-provider-openai").click();
+  await expect(page.getByTestId("set-field-image_model")).toHaveValue("custom-image:v2");
+  await expect(page.getByTestId("set-field-api_key")).toHaveValue("");
+});

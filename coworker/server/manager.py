@@ -74,9 +74,11 @@ from ..permissions import Mode
 from ..agents import list_agents as _list_agents
 from ..product import ProductProfile, current_product
 from ..providers import (
+    DEFAULT_OPENAI_IMAGE_MODEL,
     ProviderClient,
     ProviderRouter,
     get_descriptor,
+    normalize_openai_image_model,
     provider_descriptors,
     verify_provider_key,
 )
@@ -1472,6 +1474,14 @@ class SessionManager:
         out: list[dict[str, Any]] = []
         for d in provider_descriptors():
             profile = self.secrets.get(f"provider:{d.name}") or {}
+            image_model: Optional[str] = None
+            if d.name == "openai":
+                try:
+                    image_model = normalize_openai_image_model(
+                        profile.get("image_model")
+                    )
+                except ValueError:
+                    image_model = DEFAULT_OPENAI_IMAGE_MODEL
             if d.needs_key:
                 configured = bool(profile.get("api_key")) or bool(
                     d.env_key and os.environ.get(d.env_key)
@@ -1488,6 +1498,11 @@ class SessionManager:
                     **d.to_dict(),
                     "configured": configured,
                     "values": values,
+                    **(
+                        {"image_model": image_model}
+                        if d.name == "openai"
+                        else {}
+                    ),
                     "suggested_models": self._suggested_models(d.name),
                     # Key hygiene for the Settings pane: when the key was saved (date, stamped
                     # by set_provider) and when the provider last served a completion (epoch,
@@ -1590,6 +1605,16 @@ class SessionManager:
         if d is None:
             return {"ok": False, "error": f"unknown provider: {name}"}
         fields = fields or {}
+        if name == "openai" and "image_model" in fields:
+            try:
+                fields = {
+                    **fields,
+                    "image_model": normalize_openai_image_model(
+                        fields.get("image_model")
+                    ),
+                }
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
         profile = dict(self.secrets.get(f"provider:{name}") or {})
         for f in d.fields:
             if f.key not in fields:

@@ -349,9 +349,17 @@ export function ProviderForm({
                   placeholder={f.secret && ps.credentialed && !ps.dirty ? "••••••••" : f.placeholder}
                   value={ps.fields[f.key] || ""}
                   data-testid={`${tp}-field-${f.key}`}
+                  list={f.options?.length ? `${tp}-options-${f.key}` : undefined}
                   onChange={(e) => ps.setFieldValue(f.key, e.target.value)}
                   onBlur={f.secret ? undefined : () => void ps.saveField(f.key)}
                 />
+                {f.options?.length ? (
+                  <datalist id={`${tp}-options-${f.key}`}>
+                    {f.options.map((option) => (
+                      <option key={option} value={option} />
+                    ))}
+                  </datalist>
+                ) : null}
                 {ps.fieldSaved === f.key && (
                   <span
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] font-medium text-ok bg-okSoft rounded-full px-2 py-0.5 pointer-events-none"
