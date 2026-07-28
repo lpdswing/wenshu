@@ -104,9 +104,7 @@ def _optional_string(meta: Mapping[str, Any], key: str, default: str | None) -> 
     return normalized
 
 
-def load_article(path: str | Path) -> ArticleDocument:
-    article_path = Path(path)
-    text = article_path.read_text(encoding="utf-8")
+def _article_from_text(article_path: Path, text: str) -> ArticleDocument:
     raw_frontmatter, raw_body = _split_frontmatter(text)
     _reject_additional_yaml_document(raw_body)
     meta = _load_mapping(raw_frontmatter)
@@ -120,3 +118,11 @@ def load_article(path: str | Path) -> ArticleDocument:
         source_url=_optional_string(meta, "sourceUrl", None),
     )
     return ArticleDocument(path=article_path, meta=frontmatter, body=body)
+
+
+def load_article(path: str | Path) -> ArticleDocument:
+    article_path = Path(path)
+    return _article_from_text(
+        article_path,
+        article_path.read_text(encoding="utf-8"),
+    )

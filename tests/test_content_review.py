@@ -43,6 +43,33 @@ def make_outside_dir(root: Path) -> Path:
     return outside
 
 
+def swap_article_parent_after_membership_checks(
+    article_path: Path,
+    outside_parent: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Path:
+    original_resolve = review_module.resolve_in_roots
+    original_parent = article_path.parent
+    validated_parent = original_parent.with_name(f"{original_parent.name}-validated")
+    resolve_calls = 0
+
+    def resolve_then_swap(
+        path: str | Path,
+        roots: tuple[str | Path, ...],
+        must_exist: bool,
+    ) -> Path:
+        nonlocal resolve_calls
+        resolved = original_resolve(path, roots, must_exist)
+        resolve_calls += 1
+        if resolve_calls == 2:
+            original_parent.rename(validated_parent)
+            original_parent.symlink_to(outside_parent, target_is_directory=True)
+        return resolved
+
+    monkeypatch.setattr(review_module, "resolve_in_roots", resolve_then_swap)
+    return validated_parent
+
+
 def test_resolve_in_roots_accepts_absolute_and_cwd_relative_inputs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -180,25 +207,40 @@ def test_review_atomically_replaces_fixed_preview_file(
     preview_path = tmp_path / "review.html"
     preview_path.write_text("旧预览", encoding="utf-8")
     real_replace = os.replace
-    replacements: list[tuple[Path, Path]] = []
+    replacements: list[tuple[str | os.PathLike[str], str | os.PathLike[str]]] = []
 
-    def track_replace(source: str | os.PathLike[str], target: str | os.PathLike[str]) -> None:
-        source_path = Path(source)
-        target_path = Path(target)
-        assert source_path.parent == preview_path.parent
-        assert source_path != target_path
-        assert source_path.is_file()
-        replacements.append((source_path, target_path))
-        real_replace(source_path, target_path)
+    def track_replace(
+        source: str | os.PathLike[str],
+        target: str | os.PathLike[str],
+        *,
+        src_dir_fd: int | None = None,
+        dst_dir_fd: int | None = None,
+    ) -> None:
+        if src_dir_fd is None:
+            source_path = Path(source)
+            assert source_path.parent == preview_path.parent
+            assert source_path.is_file()
+        else:
+            assert src_dir_fd == dst_dir_fd
+            assert Path(source).parent == Path(".")
+            assert Path(target) == Path("review.html")
+        assert source != target
+        replacements.append((source, target))
+        real_replace(
+            source,
+            target,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+        )
 
     monkeypatch.setattr(review_module.os, "replace", track_replace)
 
     result = prepare_article_review_file(article_path, [tmp_path])
 
-    assert replacements == [(replacements[0][0], preview_path.resolve())]
+    assert len(replacements) == 1
     assert result.preview_path == preview_path.resolve()
     assert "旧预览" not in preview_path.read_text(encoding="utf-8")
-    assert not replacements[0][0].exists()
+    assert list(tmp_path.glob(".review.html.*.tmp")) == []
 
 
 def test_review_cleans_temporary_file_when_replace_fails(
@@ -207,10 +249,17 @@ def test_review_cleans_temporary_file_when_replace_fails(
     article_path = write_article(tmp_path / "article.md")
     preview_path = tmp_path / "review.html"
     preview_path.write_text("旧预览", encoding="utf-8")
-    attempted_sources: list[Path] = []
+    replace_attempts = 0
 
-    def fail_replace(source: str | os.PathLike[str], target: str | os.PathLike[str]) -> None:
-        attempted_sources.append(Path(source))
+    def fail_replace(
+        source: str | os.PathLike[str],
+        target: str | os.PathLike[str],
+        *,
+        src_dir_fd: int | None = None,
+        dst_dir_fd: int | None = None,
+    ) -> None:
+        nonlocal replace_attempts
+        replace_attempts += 1
         raise OSError("replace failed")
 
     monkeypatch.setattr(review_module.os, "replace", fail_replace)
@@ -218,8 +267,8 @@ def test_review_cleans_temporary_file_when_replace_fails(
     with pytest.raises(OSError, match="replace failed"):
         prepare_article_review_file(article_path, [tmp_path])
 
-    assert len(attempted_sources) == 1
-    assert not attempted_sources[0].exists()
+    assert replace_attempts == 1
+    assert list(tmp_path.glob(".review.html.*.tmp")) == []
     assert preview_path.read_text(encoding="utf-8") == "旧预览"
 
 
@@ -230,7 +279,7 @@ def test_review_rejects_source_escape_before_read_write_or_network(
 
     monkeypatch.setattr(
         review_module,
-        "load_article",
+        "_read_article_text",
         lambda *args, **kwargs: pytest.fail("source read forbidden"),
     )
     monkeypatch.setattr(
@@ -255,7 +304,7 @@ def test_review_rejects_preview_symlink_escape_before_source_read_or_write(
 
     monkeypatch.setattr(
         review_module,
-        "load_article",
+        "_read_article_text",
         lambda *args, **kwargs: pytest.fail("source read forbidden"),
     )
 
@@ -264,3 +313,60 @@ def test_review_rejects_preview_symlink_escape_before_source_read_or_write(
 
     assert preview_link.is_symlink()
     assert not outside_preview.exists()
+
+
+def test_review_rejects_parent_swap_before_reading_outside_article(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    allowed_root = tmp_path / "allowed"
+    article_path = write_article(allowed_root / "draft" / "article.md")
+    outside_parent = make_outside_dir(allowed_root)
+    outside_article = outside_parent / "article.md"
+    outside_article.write_bytes(b"\xffoutside article must not be read")
+    real_path_open = Path.open
+
+    def reject_outside_read(
+        path: Path,
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        if path.resolve(strict=False).is_relative_to(outside_parent):
+            pytest.fail("outside article read")
+        return real_path_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", reject_outside_read)
+    validated_parent = swap_article_parent_after_membership_checks(
+        article_path,
+        outside_parent,
+        monkeypatch,
+    )
+
+    with pytest.raises(ContentPathError):
+        prepare_article_review_file(article_path, [allowed_root])
+
+    assert outside_article.stat().st_size == len(b"\xffoutside article must not be read")
+    assert (validated_parent / "article.md").read_text(encoding="utf-8") == ARTICLE
+    assert not (outside_parent / "review.html").exists()
+
+
+def test_review_rejects_parent_swap_before_writing_outside_preview(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    allowed_root = tmp_path / "allowed"
+    article_path = write_article(allowed_root / "draft" / "article.md")
+    outside_parent = make_outside_dir(allowed_root)
+    write_article(outside_parent / "article.md", ARTICLE.replace("文枢项目介绍", "外部机密"))
+    outside_preview = outside_parent / "review.html"
+    outside_preview.write_text("外部预览不得修改", encoding="utf-8")
+    validated_parent = swap_article_parent_after_membership_checks(
+        article_path,
+        outside_parent,
+        monkeypatch,
+    )
+
+    with pytest.raises(ContentPathError):
+        prepare_article_review_file(article_path, [allowed_root])
+
+    assert outside_preview.read_text(encoding="utf-8") == "外部预览不得修改"
+    assert list(outside_parent.glob(".review.html.*.tmp")) == []
+    assert not (validated_parent / "review.html").exists()
