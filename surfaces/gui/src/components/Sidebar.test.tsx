@@ -97,11 +97,11 @@ describe("Sidebar group/filter control", () => {
     render(<Sidebar {...baseProps} />);
 
     // personas load drives the surfaces; the RECENT header's group/filter control is always present.
-    const control = await screen.findByLabelText("Group and filter conversations");
+    const control = await screen.findByLabelText("对会话分组和筛选");
 
     // Open the popover and choose "Group by → Persona".
     fireEvent.click(control);
-    fireEvent.click(await screen.findByText("Persona"));
+    fireEvent.click(await screen.findByText("按角色"));
 
     // POSTs the new layout pref.
     await waitFor(() => {
@@ -157,7 +157,7 @@ describe("Chronological list row actions (⋮ menu)", () => {
     openOpsMenu();
     fireEvent.click(screen.getByTestId("row-menu-delete"));
     expect(baseProps.onDeleteSession).not.toHaveBeenCalled();
-    expect(screen.getByTestId("row-menu-delete").textContent).toContain("Delete?");
+    expect(screen.getByTestId("row-menu-delete").textContent).toContain("确认删除？");
     fireEvent.click(screen.getByTestId("row-menu-delete"));
     expect(baseProps.onDeleteSession).toHaveBeenCalledWith("s-ops-1");
   });
@@ -228,7 +228,7 @@ describe("New-session split button", () => {
     await screen.findByText("incident watch");
 
     // No ▾ — nothing to pick; the primary button starts the sole enabled persona.
-    await waitFor(() => expect(screen.queryByLabelText("Choose a persona")).toBeNull());
+    await waitFor(() => expect(screen.queryByLabelText("选择角色")).toBeNull());
     fireEvent.click(container.querySelector(".newsplit-primary")!);
     expect(baseProps.onNewSession).toHaveBeenCalledWith("cowork");
   });
@@ -240,28 +240,28 @@ describe("New-session split button", () => {
       { match: "/v1/settings", method: "GET", json: { nav_layout: "flat" } },
     ]);
     const { container } = render(<Sidebar {...baseProps} />);
-    await screen.findByLabelText("Group and filter conversations");
+    await screen.findByLabelText("对会话分组和筛选");
 
     // Primary action → a new session with the current (last-used) persona.
     fireEvent.click(container.querySelector(".newsplit-primary")!);
     expect(baseProps.onNewSession).toHaveBeenCalledWith("cowork");
 
     // ▾ opens the persona menu: enabled personas appear, the disabled one does not, plus a manage entry.
-    fireEvent.click(screen.getByLabelText("Choose a persona"));
-    const menu = (await screen.findByText("Start a session as")).closest(".newsplit-menu") as HTMLElement;
+    fireEvent.click(screen.getByLabelText("选择角色"));
+    const menu = (await screen.findByText("选择会话角色")).closest(".newsplit-menu") as HTMLElement;
     const w = within(menu);
     expect(w.getByText("Ops")).toBeTruthy();
     expect(w.getByText("Code")).toBeTruthy();
     expect(w.queryByText("Disabled One")).toBeNull();
-    expect(w.getByText("Manage personas…")).toBeTruthy();
+    expect(w.getByText("管理角色…")).toBeTruthy();
 
     // Selecting a persona starts a session as that persona.
     fireEvent.click(w.getByText("Ops"));
     expect(baseProps.onNewSession).toHaveBeenCalledWith("ops");
 
     // "Manage personas…" opens the persona management surface.
-    fireEvent.click(screen.getByLabelText("Choose a persona"));
-    fireEvent.click(await screen.findByText("Manage personas…"));
+    fireEvent.click(screen.getByLabelText("选择角色"));
+    fireEvent.click(await screen.findByText("管理角色…"));
     expect(baseProps.onManagePersonas).toHaveBeenCalled();
   });
 
@@ -272,11 +272,11 @@ describe("New-session split button", () => {
       { match: "/v1/settings", method: "GET", json: { nav_layout: "flat" } },
     ]);
     render(<Sidebar {...baseProps} />);
-    await screen.findByLabelText("Group and filter conversations");
-    fireEvent.click(screen.getByLabelText("Choose a persona"));
-    const menu = (await screen.findByText("Start a session as")).closest(".newsplit-menu") as HTMLElement;
+    await screen.findByLabelText("对会话分组和筛选");
+    fireEvent.click(screen.getByLabelText("选择角色"));
+    const menu = (await screen.findByText("选择会话角色")).closest(".newsplit-menu") as HTMLElement;
     expect(within(menu).getByText("Ops")).toBeTruthy();
-    expect(within(menu).queryByText("Manage personas…")).toBeNull();
+    expect(within(menu).queryByText("管理角色…")).toBeNull();
   });
 });
 
@@ -309,7 +309,7 @@ describe("product feature gates", () => {
     fireEvent.click(row);
 
     expect(screen.queryByTestId("account-sign-in")).toBeNull();
-    expect(screen.getByRole("button", { name: "Connectors" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "连接器" })).toBeTruthy();
     expect(calls.some((call) => call.url.includes("/v1/cloud/"))).toBe(false);
   });
 });

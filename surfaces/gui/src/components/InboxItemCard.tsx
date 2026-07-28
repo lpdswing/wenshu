@@ -24,6 +24,13 @@ const OPT_OFF = "border-line bg-paper text-ink hover:border-accent hover:bg-acce
 const OPT_ON = "border-accent bg-accentSoft text-accent font-medium";
 const INPUT =
   "flex-1 min-w-0 rounded-lg bg-paper border border-line px-3 py-2 text-[13px] text-ink placeholder:text-faint outline-none focus:border-lineStrong";
+const KIND_LABELS: Record<string, string> = {
+  approval: "审批",
+  question: "问题",
+  directory: "文件夹访问",
+  plan: "方案",
+};
+
 
 export function InboxItemCard({
   item,
@@ -54,7 +61,7 @@ export function InboxItemCard({
         }}
       />
       <button className={BTN_PRIMARY} disabled={!answer.trim()} onClick={() => onResolve(item.id, answer)}>
-        Send
+        发送
       </button>
     </div>
   );
@@ -84,7 +91,7 @@ export function InboxItemCard({
         </div>
       ) : (
         <>
-          <div className={SEC}>{item.kind}</div>
+          <div className={SEC}>{KIND_LABELS[item.kind] || item.kind}</div>
           <div className="text-[15px] font-semibold mt-0.5 leading-snug">{item.title}</div>
         </>
       )}
@@ -102,7 +109,7 @@ export function InboxItemCard({
             className={item.data?.tool ? BTN_ACCENT : BTN_PRIMARY}
             onClick={() => onResolve(item.id, "allow")}
           >
-            {item.data?.tool ? "Allow once" : "Approve"}
+            {item.data?.tool ? "批准一次" : "批准"}
           </button>
           {/* Task-persistent standing grant (§25) — present only when the approval was
               raised inside an automation run AND the call can carry a tool+target rule.
@@ -110,17 +117,17 @@ export function InboxItemCard({
           {item.data?.task_id && item.data?.standing_target && (
             <button
               className={BTN_BORDERED}
-              title={`Always allow against ${item.data.standing_target} for “${item.data.task_title || "this automation"}” — revoke any time on its Automations page`}
+              title={`始终允许 ${item.data.standing_target} 用于“${item.data.task_title || "此自动化"}”；可随时在“自动化”页面撤销`}
               onClick={() => onResolve(item.id, "always_task")}
             >
-              Allow every time
+              此自动化始终允许
             </button>
           )}
           <button
             className={item.data?.tool ? BTN_QUIET : BTN_BORDERED}
             onClick={() => onResolve(item.id, "deny")}
           >
-            Deny
+            拒绝
           </button>
         </div>
       ) : item.kind === "question" ? (
@@ -153,19 +160,19 @@ export function InboxItemCard({
                 disabled={!selected.length}
                 onClick={() => onResolve(item.id, selected.join(", "))}
               >
-                Send{selected.length ? ` (${selected.length})` : ""}
+                发送{selected.length ? `（${selected.length}）` : ""}
               </button>
             </div>
           )}
           {(allowText || options.length === 0) &&
-            textRow(options.length ? "Or type your own answer…" : "Your answer…")}
+            textRow(options.length ? "或输入自己的回答…" : "输入回答…")}
         </>
       ) : item.kind === "directory" ? (
         <div className="flex items-center gap-2 mt-2.5">
           <button
             className={BTN_PRIMARY}
             disabled={!item.data?.path}
-            title={item.data?.path || "No folder was suggested"}
+            title={item.data?.path || "未建议文件夹"}
             onClick={() =>
               onResolve(
                 item.id,
@@ -173,10 +180,10 @@ export function InboxItemCard({
               )
             }
           >
-            {item.data?.path ? "Grant" : "Grant (no folder)"}
+            {item.data?.path ? "授权" : "授权（未指定文件夹）"}
           </button>
           <button className={BTN_BORDERED} onClick={() => onResolve(item.id, JSON.stringify({ granted: false }))}>
-            Deny
+            拒绝
           </button>
         </div>
       ) : item.kind === "plan" ? (
@@ -185,19 +192,19 @@ export function InboxItemCard({
             className={BTN_PRIMARY}
             onClick={() => onResolve(item.id, JSON.stringify({ approved: true, mode: "interactive" }))}
           >
-            Approve
+            批准
           </button>
           <button
             className={BTN_BORDERED}
             onClick={() => onResolve(item.id, JSON.stringify({ approved: false, feedback: "" }))}
           >
-            Reject
+            拒绝
           </button>
         </div>
       ) : (
         <div className="flex items-center gap-2 mt-2.5">
           <button className={BTN_BORDERED} onClick={() => onResolve(item.id, "seen")}>
-            Dismiss
+            关闭
           </button>
         </div>
       )}

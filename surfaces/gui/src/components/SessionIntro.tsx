@@ -21,11 +21,11 @@ const CONTENT_SUGGESTIONS = [
   },
 ];
 
-const FOLDER_PROMPT = "Analyze the files in this folder and summarize what matters.";
+const FOLDER_PROMPT = "分析这个文件夹中的文件并总结重点。";
 const HUBSPOT_PROMPT =
-  "Create a report on my recent HubSpot leads: sources, stages, and who needs follow-up.";
+  "根据我最近的 HubSpot 潜在客户生成报告：整理来源、阶段以及需要跟进的对象。";
 const GH_SLACK_PROMPT =
-  "Set up a weekly progress report: summarize activity in my GitHub repos and post it to Slack every Friday morning.";
+  "设置每周进展报告：汇总 GitHub 仓库动态，并在每周五上午发布到 Slack。";
 
 export function SessionIntro({
   sessionId,
@@ -98,10 +98,10 @@ export function SessionIntro({
       <div className="intro-tasks intro-setup-actions">
         <button className="task-card" data-testid="intro-task-folder" onClick={pickFolder}>
           <span className="task-card-body">
-            <span className="task-card-title">Analyze the files in a directory</span>
-            <span className="task-card-sub">I'll read them and summarize what matters</span>
+            <span className="task-card-title">分析文件夹中的资料</span>
+            <span className="task-card-sub">读取文件并总结其中的重点</span>
           </span>
-          <span className="task-card-act">Pick a folder →</span>
+          <span className="task-card-act">选择文件夹 →</span>
         </button>
         {addingFolder && (
           <div className="intro-addfolder">
@@ -125,13 +125,13 @@ export function SessionIntro({
           onClick={() => (hubspotReady ? onPrefill(HUBSPOT_PROMPT) : onOpenSessionSettings())}
         >
           <span className="task-card-body">
-            <span className="task-card-title">Create a report from my HubSpot leads</span>
+            <span className="task-card-title">根据 HubSpot 潜在客户生成报告</span>
             <span className="task-card-sub">
               {dot("hubspot", hubspotReady)}
-              Sources, stages, and who needs follow-up
+              整理来源、阶段和需要跟进的对象
             </span>
           </span>
-          <span className="task-card-act">{hubspotReady ? "Start →" : "Configure ›"}</span>
+          <span className="task-card-act">{hubspotReady ? "开始 →" : "配置 ›"}</span>
         </button>
 
         <button
@@ -140,14 +140,14 @@ export function SessionIntro({
           onClick={() => (ghSlackReady ? onPrefill(GH_SLACK_PROMPT) : onOpenSessionSettings())}
         >
           <span className="task-card-body">
-            <span className="task-card-title">Automate a weekly GitHub progress report to Slack</span>
+            <span className="task-card-title">自动生成每周 GitHub 进展报告并发布到 Slack</span>
             <span className="task-card-sub">
               {dot("github", live.has("github"))}
               {dot("slack", live.has("slack"))}
-              Repo activity, summarized and posted every Friday
+              汇总仓库动态，并在每周五发布
             </span>
           </span>
-          <span className="task-card-act">{ghSlackReady ? "Start →" : "Configure ›"}</span>
+          <span className="task-card-act">{ghSlackReady ? "开始 →" : "配置 ›"}</span>
         </button>
       </div>
     </div>

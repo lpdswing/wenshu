@@ -29,12 +29,12 @@ import { Spinner } from "./AutomationQuickstart";
 // combined grayed "Coming soon" row — both ride the same Google app, gated on
 // Google verification/CASA; give them rows when it lands.
 const TOOL_ROWS = [
-  { name: "outlook", benefit: "Stay on top of email", detail: "Outlook — triage mail, draft replies, run your calendar." },
-  { name: "slack", benefit: "Keep up with Slack", detail: "Slack — catch up, answer mentions, post updates." },
-  { name: "github", benefit: "Ship code", detail: "GitHub — review PRs, watch issues, reply to @mentions." },
-  { name: "notion", benefit: "Keep your notes in reach", detail: "Notion — search pages, query databases, draft docs." },
-  { name: "hubspot", benefit: "Keep the CRM current", detail: "HubSpot — update deals, log notes, prep calls." },
-  { name: "attio", benefit: "Track every relationship", detail: "Attio — search records, read timelines, log notes." },
+  { name: "outlook", benefit: "掌握邮件动态", detail: "Outlook — 整理邮件、起草回复、管理日历。" },
+  { name: "slack", benefit: "跟进 Slack", detail: "Slack — 汇总动态、回复提及、发布更新。" },
+  { name: "github", benefit: "推进代码交付", detail: "GitHub — 审阅 PR、跟踪问题、回复提及。" },
+  { name: "notion", benefit: "随时查阅笔记", detail: "Notion — 搜索页面、查询数据库、起草文档。" },
+  { name: "hubspot", benefit: "及时更新客户关系", detail: "HubSpot — 更新商机、记录笔记、准备通话。" },
+  { name: "attio", benefit: "跟进每段客户关系", detail: "Attio — 搜索记录、查看时间线、记录笔记。" },
 ];
 const TOOLS_SOON = ["gmail", "google_calendar"];
 
@@ -131,10 +131,9 @@ export function Onboarding({
         {step === 0 && (
           <section data-testid="ob-step-model" className="flex-1 min-h-0 flex flex-col">
             {/* Persistent header — stays put while the region below swaps (§39). */}
-            <h1 className="text-[19px] font-semibold">Welcome to 文枢<span className="beta-tag">BETA</span></h1>
+            <h1 className="text-[19px] font-semibold">欢迎使用文枢<span className="beta-tag">BETA</span></h1>
             <p className="text-[13px] text-muted mt-0.5 mb-4">
-              Pick a model provider to get started — 文枢 runs on your own key, and your
-              key and your data stay on this Mac.
+              选择一个模型服务即可开始。文枢使用你自己的密钥运行，密钥和数据都只保存在这台 Mac 上。
             </p>
 
             {!ps.sel ? (
@@ -153,13 +152,13 @@ export function Onboarding({
             <div className="flex items-center gap-3 pt-5">
               {!skipConfirm ? (
                 <button className="text-[12.5px] text-faint hover:text-muted" onClick={() => setSkipConfirm(true)}>
-                  Skip setup
+                  跳过设置
                 </button>
               ) : (
                 <span className="text-[12.5px] text-muted">
-                  Nothing works without a model —{" "}
+                  未连接模型时文枢无法工作 —{" "}
                   <button className="text-accent" onClick={() => finish()}>
-                    skip anyway
+                    仍要跳过
                   </button>
                 </span>
               )}
@@ -169,11 +168,11 @@ export function Onboarding({
                 onClick={advance}
                 data-testid="ob-continue"
               >
-                {ps.verify.state === "testing" ? "Checking…" : "Next"}
+                {ps.verify.state === "testing" ? "正在检查…" : "下一步"}
               </button>
             </div>
             <p className="text-[11px] text-faint mt-3">
-              Models can be enabled or hidden anytime in Settings ▸ Models.
+              你可以随时在“设置 → 模型”中启用或隐藏模型。
             </p>
           </section>
         )}
@@ -185,9 +184,9 @@ export function Onboarding({
              slot keeps its place but flips to a green congrats, and every row grows a quiet
              Connect pill. The gated Google pair is ONE combined grayed row. */
           <section data-testid="ob-step-tools" className="flex-1 min-h-0 flex flex-col">
-            <h1 className="text-[19px] font-semibold">Connect your everyday tools</h1>
+            <h1 className="text-[19px] font-semibold">连接常用工具</h1>
             <p className="text-[13px] text-muted mt-0.5 mb-3">
-              Chat can only advise. Connected, your coworker does the actual work:
+              只对话时，文枢只能提供建议；连接工具后，文枢才能代你完成实际操作：
             </p>
 
             <div className="flex-1 min-h-0 overflow-y-auto pr-1" data-testid="ob-tool-gallery">
@@ -209,15 +208,15 @@ export function Onboarding({
                       managedOAuthEnabled &&
                       cloud?.signed_in &&
                       (c.connected ? (
-                        <span className="text-[12px] text-ok font-medium shrink-0">✓ Connected</span>
+                        <span className="text-[12px] text-ok font-medium shrink-0">✓ 已连接</span>
                       ) : pendingTool === name ? (
-                        <span className="text-[12px] text-muted shrink-0">Check your browser…</span>
+                        <span className="text-[12px] text-muted shrink-0">请在浏览器中确认…</span>
                       ) : (
                         <button
                           className="shrink-0 rounded-full border border-line px-4 py-1.5 text-[12.5px] font-medium hover:border-lineStrong"
                           onClick={() => startTool(name)}
                         >
-                          Connect
+                          连接
                         </button>
                       ))}
                   </div>
@@ -240,14 +239,14 @@ export function Onboarding({
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-[13.5px] font-semibold leading-tight text-faint">
-                      Gmail &amp; Google Calendar
+                      Gmail 与 Google 日历
                     </span>
                     <span className="block text-[12px] text-faint truncate">
-                      Coming soon — pending Google&rsquo;s app verification.
+                      即将推出 — 正在等待 Google 应用验证。
                     </span>
                   </span>
                   {cloudEnabled && cloud?.signed_in && (
-                    <span className="text-[11.5px] text-faint shrink-0">Coming soon</span>
+                    <span className="text-[11.5px] text-faint shrink-0">即将推出</span>
                   )}
                 </div>
               )}
@@ -261,25 +260,24 @@ export function Onboarding({
                 <div className="mt-3.5 rounded-xl border border-line bg-paper px-4 py-3 flex items-center gap-3.5 shrink-0">
                   <span className="flex-1 text-[12.5px] text-muted leading-snug">
                     <span className="block text-[13px] font-semibold text-ink mb-0.5">
-                      Sign in for one-click connections
+                      登录后可一键连接
                     </span>
-                    OpenWorker handles the OAuth for 20+ tools — no dev consoles, no pasted keys.
-                    Tokens stay on this Mac.
+                    OpenWorker Cloud 可为 20 多种工具完成 OAuth 授权，无需打开开发者控制台或粘贴密钥；令牌只保存在这台 Mac 上。
                   </span>
                   {signinPhase ? (
                     <span className="inline-flex items-center gap-2 text-[12.5px] text-muted shrink-0">
                       <Spinner />
                       {signinPhase === "opening" ? (
-                        "Opening browser…"
+                        "正在打开浏览器…"
                       ) : (
                         <>
-                          Waiting…{" "}
+                          等待授权…{" "}
                           <button
                             className="underline hover:text-ink"
                             onClick={() => setSigninPhase(null)}
                             data-testid="ob-signin-cancel"
                           >
-                            Cancel
+                            取消
                           </button>
                         </>
                       )}
@@ -294,7 +292,7 @@ export function Onboarding({
                       }}
                       data-testid="ob-cloud-signin"
                     >
-                      Sign in
+                      登录
                     </button>
                   )}
                 </div>
@@ -304,11 +302,10 @@ export function Onboarding({
                   data-testid="ob-tools-signedin"
                 >
                   <span className="block text-[13px] font-semibold text-ok mb-0.5">
-                    🎉 You&rsquo;re signed in{cloud.account ? ` as ${cloud.account}` : ""}
+                    🎉 已登录{cloud.account ? `：${cloud.account}` : ""}
                   </span>
                   <span className="block text-[12.5px] text-muted">
-                    Connect a tool above with one click — or add them anytime later from the
-                    Connectors page.
+                    点击上方按钮即可连接工具，也可以稍后从“连接器”页面添加。
                   </span>
                 </div>
               ))}
@@ -321,7 +318,7 @@ export function Onboarding({
                   onClick={() => setStep(2)}
                   data-testid="ob-continue-tools"
                 >
-                  Next
+                  下一步
                 </button>
               ) : (
                 <button
@@ -334,13 +331,12 @@ export function Onboarding({
                   onClick={() => setStep(2)}
                   data-testid={cloudEnabled ? "ob-tools-skip" : "ob-continue-tools"}
                 >
-                  {cloudEnabled ? "Continue without sign-in" : "Next"}
+                  {cloudEnabled ? "暂不登录，继续" : "下一步"}
                 </button>
               )}
             </div>
             <p className="text-[11px] text-faint mt-3">
-              30+ more tools on the Connectors page — add or remove anytime. Tokens stay on
-              this Mac.
+              “连接器”页面还有 30 多种工具，可随时添加或移除。令牌只保存在这台 Mac 上。
             </p>
           </section>
         )}
@@ -351,8 +347,8 @@ export function Onboarding({
               <div className="w-12 h-12 rounded-full bg-okSoft text-ok grid place-items-center mx-auto mb-3 text-[22px]">
                 ✓
               </div>
-              <h1 className="text-[19px] font-semibold mb-1">You're set up</h1>
-              <p className="text-[13px] text-muted mb-5">Two good ways to start:</p>
+              <h1 className="text-[19px] font-semibold mb-1">设置完成</h1>
+              <p className="text-[13px] text-muted mb-5">你可以从这两种方式开始：</p>
             </div>
 
             <button
@@ -364,9 +360,9 @@ export function Onboarding({
                 ◷
               </span>
               <span className="flex-1 min-w-0 text-left">
-                <b className="block text-[13.5px]">Create your first automation</b>
+                <b className="block text-[13.5px]">创建第一个自动化</b>
                 <span className="text-[12px] text-muted">
-                  A weekly digest, a morning brief — pick a template, running in two minutes.
+                  选择模板，在两分钟内开始自动生成每周摘要或晨报。
                 </span>
               </span>
               <span className="text-faint self-center">›</span>
@@ -380,9 +376,9 @@ export function Onboarding({
                 ✦
               </span>
               <span className="flex-1 min-w-0 text-left">
-                <b className="block text-[13.5px]">Start working with Coworker</b>
+                <b className="block text-[13.5px]">开始使用文枢</b>
                 <span className="text-[12px] text-muted">
-                  Open a session and just ask — analyze files, draft, research, build.
+                  打开会话直接提出需求：分析文件、撰写内容、研究或构建项目。
                 </span>
               </span>
               <span className="text-faint self-center">›</span>
@@ -392,7 +388,7 @@ export function Onboarding({
                 (owner call 2026-07-12); the finish("gallery") plumbing remains for their return. */}
 
             <p className="text-[11px] text-faint text-center mt-auto pt-5">
-              Replay this setup anytime: Settings ▸ Appearance ▸ Run setup again.
+              你可以随时从“设置 → 外观 → 重新运行设置”再次打开本向导。
             </p>
           </section>
         )}

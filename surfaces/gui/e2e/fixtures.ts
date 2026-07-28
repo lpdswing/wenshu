@@ -624,7 +624,7 @@ export async function mockApi(
       if (msg.type === "user_message") {
         hadTurn = true;
         send("turn_start", { input: msg.text });
-        if (/run a tool/i.test(msg.text)) {
+        if (/(?:run a tool|运行一个工具)/i.test(msg.text)) {
           pendingTool = "run_shell";
           send("tool_proposed", { name: "run_shell", arguments: { command: "ls" } });
           send("permission_required", {
@@ -635,7 +635,7 @@ export async function mockApi(
           return; // suspended on the approval
         }
         // §35 compact row: a routine workspace write (content rides in the args).
-        if (/write a file/i.test(msg.text)) {
+        if (/(?:write a file|写一个文件)/i.test(msg.text)) {
           pendingTool = "write_file";
           const args = {
             path: "src/fetch_data.py",
@@ -647,7 +647,7 @@ export async function mockApi(
         }
         // A one-paragraph digest with NO newlines — the owner-repro shape that once
         // ballooned the card to full-transcript height (char clamp, 2026-07-15).
-        if (/post the long digest/i.test(msg.text)) {
+        if (/(?:post the long digest|长摘要)/i.test(msg.text)) {
           pendingTool = "send_message";
           const args = {
             target: "slack:T1/C1",

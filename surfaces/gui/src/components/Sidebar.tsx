@@ -32,14 +32,14 @@ import { showPersonas } from "../flags";
 // Session surfaces shown as accordions, in display order. The surfaced personas drive this list
 // (so third-party / Ops personas appear); the hardcoded set is the fallback before personas load.
 const SURFACES: { key: string; label: string; icon: IconName; cls: string }[] = [
-  { key: "cowork", label: "Coworker", icon: "diamond", cls: "ico-cowork" },
-  { key: "chat", label: "Chat", icon: "chat", cls: "ico-chat" },
-  { key: "code", label: "Code", icon: "code", cls: "ico-code" },
+  { key: "cowork", label: "文枢", icon: "diamond", cls: "ico-cowork" },
+  { key: "chat", label: "对话", icon: "chat", cls: "ico-chat" },
+  { key: "code", label: "代码", icon: "code", cls: "ico-code" },
 ];
 
 const surfaceFromPersona = (p: Persona) => ({
   key: p.id,
-  label: shortPersonaName(p.name, p.id),
+  label: p.id === "cowork" ? "文枢" : shortPersonaName(p.name, p.id),
   icon: personaGlyph(p.icon, p.family),
   cls: `ico-${p.icon || "cowork"}`,
 });
@@ -51,7 +51,7 @@ function AttnBadge({ n }: { n: number }) {
   return (
     <span
       className="text-[10px] font-semibold text-ink bg-faint/30 rounded-full px-1.5 leading-[15px] shrink-0"
-      title={`${n} awaiting your attention`}
+      title={`${n} 项待你处理`}
     >
       {n > 99 ? "99+" : n}
     </span>
@@ -66,7 +66,7 @@ function UnseenBadge({ n, failed }: { n: number; failed?: boolean }) {
   return (
     <span
       className="text-[10px] font-semibold text-ink bg-faint/30 rounded-full px-1.5 leading-[15px] shrink-0"
-      title={failed ? `${n} new run${n > 1 ? "s" : ""} — the latest failed` : `${n} new run${n > 1 ? "s" : ""}`}
+      title={failed ? `${n} 条新执行记录 — 最近一次失败` : `${n} 条新执行记录`}
     >
       {n > 99 ? "99+" : n}
     </span>
@@ -78,11 +78,11 @@ function UnseenBadge({ n, failed }: { n: number; failed?: boolean }) {
 function LiveDot({ state }: { state?: "working" | "sleeping" | "idle" }) {
   if (state !== "working" && state !== "sleeping") return null;
   return state === "working" ? (
-    <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse shrink-0" title="Working now" />
+    <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse shrink-0" title="正在工作" />
   ) : (
     <span
       className="w-1.5 h-1.5 rounded-full bg-faint/60 shrink-0"
-      title="Sleeping (will wake itself)"
+      title="休眠中（将自动唤醒）"
     />
   );
 }
@@ -95,7 +95,7 @@ function OriginIcon({ s }: { s: SessionInfo }) {
     <ConnectorIcon
       connector={{ logo: "slack", brand_color: "#611f69" }}
       size={12}
-      title={s.origin_label || "From Slack"}
+      title={s.origin_label || "来自 Slack"}
     />
   );
 }
@@ -150,24 +150,24 @@ interface Props {
   onPeekLeave?: () => void;
 }
 
-// Compact age for project session rows: "now" / "5m" / "6h" / "3d" / "2w" / "4mo" / "2y".
+// Compact age for project session rows.
 const compactAge = (iso?: string | null): string => {
   if (!iso) return "";
   const then = Date.parse(iso);
   if (Number.isNaN(then)) return "";
   const secs = Math.max(0, Math.floor((Date.now() - then) / 1000));
-  if (secs < 60) return "now";
+  if (secs < 60) return "刚刚";
   const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m`;
+  if (mins < 60) return `${mins} 分钟`;
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h`;
+  if (hrs < 24) return `${hrs} 小时`;
   const days = Math.floor(hrs / 24);
-  if (days < 7) return `${days}d`;
+  if (days < 7) return `${days} 天`;
   const weeks = Math.floor(days / 7);
-  if (days < 30) return `${weeks}w`;
+  if (days < 30) return `${weeks} 周`;
   const months = Math.floor(days / 30);
-  if (days < 365) return `${months}mo`;
-  return `${Math.floor(days / 365)}y`;
+  if (days < 365) return `${months} 个月`;
+  return `${Math.floor(days / 365)} 年`;
 };
 
 // Sessions shown per group before "Show more" comes from Settings (sessions_peek, default 5).
@@ -469,8 +469,8 @@ export function Sidebar(props: Props) {
         onClick={(e) => e.stopPropagation()}
       >
         <button
-          title="Session actions"
-          aria-label="Session actions"
+          title="会话操作"
+          aria-label="会话操作"
           aria-haspopup="menu"
           aria-expanded={menuOpen}
           data-testid="row-menu"
@@ -491,20 +491,20 @@ export function Sidebar(props: Props) {
               style={{ top: rowMenu!.top, left: rowMenu!.left }}
               role="menu"
             >
-              {item("row-menu-rename", "pencil", "Rename", () => {
+              {item("row-menu-rename", "pencil", "重命名", () => {
                 setEditingId(s.session_id);
                 setEditValue(title);
               })}
-              {item("row-menu-pin", "pin", s.pinned ? "Unpin" : "Pin", () =>
+              {item("row-menu-pin", "pin", s.pinned ? "取消置顶" : "置顶", () =>
                 props.onTogglePin(s.session_id, !s.pinned),
               )}
-              {item("row-menu-archive", "archive", s.archived ? "Unarchive" : "Archive", () =>
+              {item("row-menu-archive", "archive", s.archived ? "取消归档" : "归档", () =>
                 props.onArchiveSession(s.session_id, !s.archived),
               )}
               <div className="h-px bg-line my-1 mx-2" />
               {confirmDelId === s.session_id ? (
                 <button
-                  title="Click again to permanently delete"
+                  title="再次点击将永久删除"
                   className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[12.5px] text-left font-medium text-danger hover:bg-paper"
                   data-testid="row-menu-delete"
                   role="menuitem"
@@ -514,7 +514,7 @@ export function Sidebar(props: Props) {
                   }}
                 >
                   <Icon name="trash" size={13} className="shrink-0" />
-                  <span className="flex-1">Delete?</span>
+                  <span className="flex-1">确认删除？</span>
                 </button>
               ) : (
                 <button
@@ -524,7 +524,7 @@ export function Sidebar(props: Props) {
                   onClick={() => setConfirmDelId(s.session_id)}
                 >
                   <Icon name="trash" size={13} className="shrink-0" />
-                  <span className="flex-1">Delete</span>
+                  <span className="flex-1">删除</span>
                 </button>
               )}
             </div>
@@ -676,7 +676,7 @@ export function Sidebar(props: Props) {
     pinnedSessions.length > 0 ? (
       <div>
         <div className="px-1.5 text-[10.5px] uppercase tracking-[0.07em] text-faint font-semibold mb-1">
-          Pinned
+          置顶
         </div>
         <div className="space-y-0.5">
           {pinnedSessions.map((s) => cardRow(s))}
@@ -691,7 +691,7 @@ export function Sidebar(props: Props) {
     automations.length > 0 ? (
       <div data-testid="scheduled-band">
         <div className="px-1.5 text-[10.5px] uppercase tracking-[0.07em] text-faint font-semibold mb-1">
-          Scheduled
+          自动化计划
         </div>
         <div className="space-y-0.5">
           {automations.map((a) => (
@@ -723,12 +723,12 @@ export function Sidebar(props: Props) {
     return (
     <div className="relative flex items-center justify-between px-1.5 mb-1" data-testid="recent-header">
       <span className="text-[10.5px] uppercase tracking-[0.07em] text-faint font-semibold">
-        Recent
+        最近
       </span>
       <button
         className="w-6 h-6 grid place-items-center rounded-md text-faint hover:text-ink hover:bg-paper -mr-1"
-        title="Group & filter conversations"
-        aria-label="Group and filter conversations"
+        title="对会话分组和筛选"
+        aria-label="对会话分组和筛选"
         onClick={() => setGroupMenuOpen((v) => !v)}
       >
         <Icon name="sliders" size={14} />
@@ -742,9 +742,9 @@ export function Sidebar(props: Props) {
             data-testid="group-filter-menu"
           >
             <div className="px-2 pt-1 pb-1 text-[10.5px] uppercase tracking-[0.06em] text-faint font-semibold">
-              Group by
+              分组方式
             </div>
-            {([["grouped", "Persona"], ["flat", "Chronological"]] as ["flat" | "grouped", string][]).map(
+            {([["grouped", "按角色"], ["flat", "按时间"]] as ["flat" | "grouped", string][]).map(
               ([key, label]) => (
                 <button
                   key={key}
@@ -761,11 +761,11 @@ export function Sidebar(props: Props) {
                 <div className="my-1 border-t border-line" />
                 <div className="px-2 pt-1 pb-1 flex items-center justify-between">
                   <span className="text-[10.5px] uppercase tracking-[0.06em] text-faint font-semibold">
-                    Filter by coworker
+                    按角色筛选
                   </span>
                   {filterPersonas.size > 0 && (
                     <button className="text-[11px] text-accent" onClick={() => setFilterPersonas(new Set())}>
-                      Clear
+                      清除
                     </button>
                   )}
                 </div>
@@ -792,7 +792,7 @@ export function Sidebar(props: Props) {
                   })}
                 </div>
                 <div className="px-2 pt-1 pb-0.5 text-[11px] text-faint leading-snug">
-                  None checked shows all.
+                  未选择时显示全部会话。
                 </div>
               </>
             )}
@@ -876,12 +876,12 @@ export function Sidebar(props: Props) {
                 rows carry a right-aligned compact age and truncate to PROJECT_PEEK + "Show more". */}
             <div className="flex items-center justify-between px-1.5 pt-1">
               <span className="text-[10.5px] uppercase tracking-[0.07em] text-faint font-semibold">
-                Projects
+                项目
               </span>
               <button
                 className="w-5 h-5 grid place-items-center rounded text-faint hover:text-ink hover:bg-panel"
-                title="New project"
-                aria-label="New project"
+                title="新建项目"
+                aria-label="新建项目"
                 onClick={() => props.onNewProject(browseKey)}
               >
                 <Icon name="folderPlus" size={14} />
@@ -890,7 +890,7 @@ export function Sidebar(props: Props) {
             <div className="space-y-0.5">
               {projectOrder.length === 0 && (
                 <div className="px-2 py-1.5 text-[12px] text-faint leading-snug">
-                  No projects yet — start one with the + above.
+                  暂无项目 — 点击上方的 + 开始。
                 </div>
               )}
               {projectOrder.map((proj) => {
@@ -940,13 +940,13 @@ export function Sidebar(props: Props) {
                               className="px-2 py-1 text-[12px] text-faint hover:text-muted"
                               onClick={() => setProjShowAll((s) => toggleSet(s, proj))}
                             >
-                              Show more ({list.length - peek})
+                              显示更多（{list.length - peek}）
                             </button>
                           )}
                         </div>
                       ) : (
                         <div className="px-2 py-1.5 pl-[19px] text-[12px] text-faint leading-snug">
-                          No conversations in this project yet.
+                          此项目暂无会话。
                         </div>
                       ))}
                   </div>
@@ -958,7 +958,7 @@ export function Sidebar(props: Props) {
           <div className="space-y-0.5">
             {mine.filter(matches).length === 0 ? (
               <div className="px-2 py-1.5 text-[12px] text-faint leading-snug">
-                {normalizedQuery ? "No matching conversations." : "No conversations yet."}
+                {normalizedQuery ? "没有匹配的会话。" : "暂无会话。"}
               </div>
             ) : (
               <>
@@ -971,7 +971,7 @@ export function Sidebar(props: Props) {
                     className="px-2 py-1 text-[12px] text-faint hover:text-muted"
                     onClick={() => setPersonaShowAll((s) => toggleSet(s, browseKey))}
                   >
-                    Show more ({mine.filter(matches).length - peek})
+                    显示更多（{mine.filter(matches).length - peek}）
                   </button>
                 )}
               </>
@@ -986,7 +986,7 @@ export function Sidebar(props: Props) {
               onClick={() => setShowArchived((v) => !v)}
             >
               <Icon name={showArchived ? "chevronDown" : "chevronRight"} size={13} className="shrink-0" />
-              Archived ({archived.length})
+              已归档（{archived.length}）
             </button>
             {showArchived && (
               <div className="space-y-0.5 mt-0.5">{archived.filter(matches).map((s) => sessionRow(s))}</div>
@@ -1011,8 +1011,8 @@ export function Sidebar(props: Props) {
         {props.onCollapse && (
           <button
             className="nav-pin-btn w-7 h-7 grid place-items-center rounded-md text-faint hover:text-ink hover:bg-paper shrink-0"
-            title={props.collapsed ? "Dock sidebar (⌘B)" : "Collapse sidebar (⌘B)"}
-            aria-label={props.collapsed ? "Dock sidebar" : "Collapse sidebar"}
+            title={props.collapsed ? "固定侧边栏 (⌘B)" : "收起侧边栏 (⌘B)"}
+            aria-label={props.collapsed ? "固定侧边栏" : "收起侧边栏"}
             onClick={props.onCollapse}
           >
             <Icon name="sidebar" size={16} />
@@ -1036,7 +1036,7 @@ export function Sidebar(props: Props) {
           className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-left text-muted hover:bg-paper hover:text-ink"
           onClick={() => setSearchModalOpen(true)}
         >
-          <Icon name="search" size={15} className="shrink-0" /> Search
+          <Icon name="search" size={15} className="shrink-0" /> 搜索
         </button>
       </div>
 
@@ -1052,7 +1052,7 @@ export function Sidebar(props: Props) {
           onClick={props.onOpenScheduled}
         >
           <Icon name="clock" size={15} className="shrink-0" />
-          <span className="flex-1">Automations</span>
+          <span className="flex-1">自动化</span>
         </button>
       </div>
 
@@ -1113,7 +1113,7 @@ export function Sidebar(props: Props) {
             <div className="space-y-0.5">
               {recentSessions.length === 0 ? (
                 <div className="px-2 py-1.5 text-[12px] text-faint leading-snug">
-                  {normalizedQuery ? "No matching conversations." : "No conversations yet."}
+                  {normalizedQuery ? "没有匹配的会话。" : "暂无会话。"}
                 </div>
               ) : (
                 <>
@@ -1127,8 +1127,8 @@ export function Sidebar(props: Props) {
                       onClick={() => setRecentExpanded((v) => !v)}
                     >
                       {recentExpanded
-                        ? "Show less"
-                        : `Show ${recentSessions.length - RECENT_PEEK} more`}
+                        ? "收起"
+                        : `再显示 ${recentSessions.length - RECENT_PEEK} 个`}
                     </button>
                   )}
                 </>
@@ -1187,22 +1187,22 @@ export function Sidebar(props: Props) {
                 ))}
                 {appMenuItem(
                   "inbox",
-                  "Inbox",
+                  "收件箱",
                   props.onOpenInbox,
                   props.inboxActive,
                   <AttnBadge n={totalAttention} />,
                 )}
-                {appMenuItem("plug", "Connectors", props.onOpenIntegrations, props.integrationsActive)}
+                {appMenuItem("plug", "连接器", props.onOpenIntegrations, props.integrationsActive)}
                 <div className="h-px bg-line my-1 mx-2" />
                 {appMenuItem(
                   "gear",
-                  "Settings",
+                  "设置",
                   props.onManage,
                   false,
                   <span className="text-[11px] text-faint">⌘ ,</span>,
                 )}
-                {appMenuItem("clock", "Automations", props.onOpenScheduled, props.scheduledActive)}
-                {appMenuItem("audit", "Activity", props.onOpenAudit, props.auditActive)}
+                {appMenuItem("clock", "自动化", props.onOpenScheduled, props.scheduledActive)}
+                {appMenuItem("audit", "活动记录", props.onOpenAudit, props.auditActive)}
                 {cloudSignedIn && (
                   <>
                     <div className="h-px bg-line my-1 mx-2" />
@@ -1233,7 +1233,7 @@ export function Sidebar(props: Props) {
                 ? `Account: ${accountEmail}`
                 : cloudEnabled
                   ? "Account: not signed in"
-                  : "Open application menu"
+                  : "打开应用菜单"
             }
           >
             <span
@@ -1271,9 +1271,9 @@ export function Sidebar(props: Props) {
                 data-testid="inbox-chip"
                 role="button"
                 aria-label={
-                  totalAttention > 0 ? `Inbox — ${totalAttention} items need you` : "Inbox"
+                  totalAttention > 0 ? `收件箱 — ${totalAttention} 项待你处理` : "收件箱"
                 }
-                title={totalAttention > 0 ? `Inbox — ${totalAttention} items need you` : "Inbox"}
+                title={totalAttention > 0 ? `收件箱 — ${totalAttention} 项待你处理` : "收件箱"}
                 onClick={(e) => {
                   // The chip goes STRAIGHT to Inbox — the menu is the row's target, not the chip's.
                   e.stopPropagation();
@@ -1339,13 +1339,13 @@ function NewSessionSplit({
           }
           onClick={() => onNew(solo && enabled.length === 1 ? enabled[0].id : current)}
         >
-          <Icon name="plus" size={15} className="shrink-0" /> New session
+          <Icon name="plus" size={15} className="shrink-0" /> 新建会话
         </button>
         {!solo && (
           <button
             className="px-2.5 rounded-r-lg bg-accent text-white border-l border-white/25 hover:opacity-95 flex items-center"
-            title="Start with a specific persona"
-            aria-label="Choose a persona"
+            title="选择角色开始会话"
+            aria-label="选择角色"
             onClick={() => setOpen((v) => !v)}
           >
             <Icon name="chevronDown" size={13} />
@@ -1357,7 +1357,7 @@ function NewSessionSplit({
           <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
           <div className="newsplit-menu absolute left-3 right-3 mt-1 z-30 bg-panel border border-line rounded-xl2 shadow-xl p-1">
             <div className="px-2 py-1 text-[10.5px] uppercase tracking-[0.06em] text-faint font-semibold">
-              Start a session as
+              选择会话角色
             </div>
             {enabled.map((p) => (
               <button
@@ -1390,7 +1390,7 @@ function NewSessionSplit({
                     onManage();
                   }}
                 >
-                  Manage personas…
+                  管理角色…
                 </button>
               </div>
             )}

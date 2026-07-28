@@ -49,12 +49,12 @@ it("hides manual updater controls when the product disables updates", () => {
   render(<SettingsView galleryEnabled={false} updaterEnabled={false} />);
 
   expect(screen.queryByTestId("settings-update-check")).toBeNull();
-  expect(screen.getByText("Setup")).toBeTruthy();
+  expect(screen.getByText("设置")).toBeTruthy();
 });
 
 it("keeps manual updater controls for an updater-enabled product", () => {
   render(<SettingsView galleryEnabled={false} updaterEnabled />);
 
   expect(screen.getByTestId("settings-update-check")).toBeTruthy();
-  expect(screen.getByText("Setup & updates")).toBeTruthy();
+  expect(screen.getByText("设置与更新")).toBeTruthy();
 });

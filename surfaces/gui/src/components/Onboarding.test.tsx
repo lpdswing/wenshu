@@ -65,6 +65,8 @@ it("does not poll or render Cloud and managed OAuth entry points when disabled",
   });
   expect(requests.some((url) => url.includes("/v1/cloud/"))).toBe(false);
   expect(screen.queryByTestId("ob-cloud-signin")).toBeNull();
-  expect(screen.queryByText("Sign in for one-click connections")).toBeNull();
-  expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
+  expect(screen.getByRole("heading", { name: "连接常用工具" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "下一步" })).toBeTruthy();
+  expect(screen.queryByText("登录后可一键连接")).toBeNull();
+  expect(screen.queryByRole("button", { name: "连接" })).toBeNull();
 });

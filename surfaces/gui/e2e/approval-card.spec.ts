@@ -4,33 +4,33 @@
 // description, external actions wear the leaves-this-Mac note. No "PERMISSION REQUIRED"
 // kicker, no raw args dump, no solid-fill buttons.
 import { expect } from "@playwright/test";
-import { test } from "./fixtures";
+import { wenshuTest as test } from "./fixtures";
 
 test("routine write → compact row: humanized title, inline preview, Allow resolves", async ({
   page,
 }) => {
   await page.goto("/");
-  const box = page.getByPlaceholder(/Ask the coworker/);
-  await box.fill("please write a file");
-  await page.getByRole("button", { name: "Send" }).click();
+  const box = page.getByPlaceholder("告诉文枢你想完成什么...");
+  await box.fill("请写一个文件");
+  await page.getByRole("button", { name: "发送" }).click();
 
   const row = page.getByTestId("approval-row");
-  await expect(row).toContainText("Write fetch_data.py");
+  await expect(row).toContainText("写入 fetch_data.py");
   await expect(row).not.toContainText(/permission required/i);
-  await expect(row.getByRole("button", { name: "Always allow", exact: true })).toHaveAttribute(
+  await expect(row.getByRole("button", { name: "本次会话始终允许", exact: true })).toHaveAttribute(
     "title",
-    /for this session/,
+    /本次会话/,
   );
 
   // Preview expands INLINE from the tool args — the file doesn't exist yet.
-  await row.getByText("preview ▾").click();
+  await row.getByText("预览 ▾").click();
   await expect(row).toContainText("import json");
-  await row.getByText("show all 6 lines").click();
+  await row.getByText("显示全部 6 行").click();
   await expect(row).toContainText("done = True");
 
   await page.screenshot({ path: "test-results/ux018-compact-row.png", fullPage: false });
 
-  await row.getByRole("button", { name: "Allow", exact: true }).click();
+  await row.getByRole("button", { name: "批准", exact: true }).click();
   await expect(page.getByText(/Done via write_file/)).toBeVisible();
 });
 
@@ -38,21 +38,21 @@ test("run_shell → full card: description title, command preview, stays-on-this
   page,
 }) => {
   await page.goto("/");
-  const box = page.getByPlaceholder(/Ask the coworker/);
-  await box.fill("please run a tool");
-  await page.getByRole("button", { name: "Send" }).click();
+  const box = page.getByPlaceholder("告诉文枢你想完成什么...");
+  await box.fill("请运行一个工具");
+  await page.getByRole("button", { name: "发送" }).click();
 
   // The mocked proposal has no description → plain "Run a command" title; the command is
   // the preview; the reason still renders; the scope note replaces the old badge.
-  await expect(page.getByText("Run a command").last()).toBeVisible();
-  await expect(page.getByText("stays on this Mac").last()).toBeVisible();
+  await expect(page.getByText("运行命令").last()).toBeVisible();
+  await expect(page.getByText("仅在此 Mac 上执行").last()).toBeVisible();
   await expect(page.getByText("The coworker wants to run a command.").first()).toBeVisible();
-  await expect(page.getByRole("button", { name: "Always allow this command" }).last()).toBeVisible();
+  await expect(page.getByRole("button", { name: "始终允许此命令" }).last()).toBeVisible();
   await expect(page.getByText(/local action/)).toHaveCount(0);
 
   await page.screenshot({ path: "test-results/ux018-shell-card.png", fullPage: false });
 
-  await page.getByRole("button", { name: "Allow once" }).last().click();
+  await page.getByRole("button", { name: "批准一次" }).last().click();
   await expect(page.getByText("The command ran; 1 file found.")).toBeVisible();
 });
 
@@ -60,9 +60,9 @@ test("a one-paragraph digest send is clamped to a card, expandable in place", as
   page,
 }) => {
   await page.goto("/");
-  const box = page.getByPlaceholder(/Ask the coworker/);
-  await box.fill("post the long digest");
-  await page.getByRole("button", { name: "Send" }).click();
+  const box = page.getByPlaceholder("告诉文枢你想完成什么...");
+  await box.fill("发送长摘要");
+  await page.getByRole("button", { name: "发送" }).click();
 
   // The message rides in a clamped preview box — not an unbounded quote wall.
   const prev = page.locator(".approval-prev");
@@ -74,7 +74,7 @@ test("a one-paragraph digest send is clamped to a card, expandable in place", as
   await page.screenshot({ path: "test-results/send-digest-clamped.png", fullPage: false });
 
   // Expands in place, and can collapse back.
-  await prev.getByText("show the full message").click();
+  await prev.getByText("显示完整消息").click();
   expect((await prev.boundingBox())!.height).toBeGreaterThan(clampedHeight);
-  await expect(prev.getByText("show less")).toBeVisible();
+  await expect(prev.getByText("收起")).toBeVisible();
 });

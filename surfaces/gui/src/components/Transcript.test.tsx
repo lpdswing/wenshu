@@ -23,8 +23,8 @@ describe("TurnGroup (Transcript §33)", () => {
     const { container } = render(<Transcript items={TURN} onApprove={vi.fn()} />);
 
     // Collapsed at rest: "2 steps", NO approval count, and no step/narration content visible.
-    expect(screen.getByText("2 steps")).toBeTruthy();
-    expect(screen.queryByText(/approval/)).toBeNull();
+    expect(screen.getByText("2 个步骤")).toBeTruthy();
+    expect(screen.queryByText(/审批/)).toBeNull();
     expect(screen.queryByTestId("turn-narration")).toBeNull();
     expect(screen.queryByText(/Sent a Slack message/)).toBeNull();
 
@@ -37,11 +37,11 @@ describe("TurnGroup (Transcript §33)", () => {
     expect(screen.getByTestId("turn-narration").textContent).toContain("Checking what merged");
     expect(screen.getByText("runbook.md")).toBeTruthy();
     expect(screen.getByText(/Sent a Slack message to/)).toBeTruthy();
-    expect(screen.getByText("✓ approved")).toBeTruthy();
+    expect(screen.getByText("✓ 已批准")).toBeTruthy();
     expect(screen.queryByText("send_message approval")).toBeNull();
 
     // Raw stays one click away: the row's raw toggle reveals args + result verbatim.
-    fireEvent.click(screen.getAllByText("raw")[1]);
+    fireEvent.click(screen.getAllByText("详情")[1]);
     expect(container.textContent).toContain('{"ok": true}');
   });
 
@@ -51,7 +51,7 @@ describe("TurnGroup (Transcript §33)", () => {
       { kind: "tool", id: "t1", name: "grep", args: { pattern: "TODO" }, status: "…" },
     ];
     const { container } = render(<Transcript items={items} onApprove={vi.fn()} />);
-    expect(screen.getByText(/Running 1 step…/)).toBeTruthy();
+    expect(screen.getByText(/正在执行 1 个步骤…/)).toBeTruthy();
     expect(screen.queryByTestId("turn-narration")).toBeNull(); // collapsed by default
     expect(screen.getByTestId("turn-live-line").textContent).toContain("Looking at the repo");
     fireEvent.click(container.querySelector("summary.stepgroup-head")!);
@@ -64,12 +64,12 @@ describe("TurnGroup (Transcript §33)", () => {
       { kind: "approval", name: "run_shell", args: { command: "rm -rf build/" }, reason: "", resolved: "deny" },
     ];
     const { container } = render(<Transcript items={items} onApprove={vi.fn()} />);
-    expect(screen.getByTestId("stepgroup-declined").textContent).toBe("1 declined");
+    expect(screen.getByTestId("stepgroup-declined").textContent).toBe("1 个已拒绝");
     fireEvent.click(container.querySelector("summary.stepgroup-head")!);
     const ask = screen.getByTestId("turn-ask");
-    expect(ask.textContent).toContain("Wanted to run");
+    expect(ask.textContent).toContain("曾请求运行");
     expect(ask.textContent).toContain("rm -rf build/");
-    expect(ask.textContent).toContain("✕ declined");
+    expect(ask.textContent).toContain("✕ 已拒绝");
   });
 
   it("assistant-only turns stay plain bubbles (no disclosure)", () => {
@@ -164,7 +164,7 @@ describe("bubble hover affordances (FB-005)", () => {
     expect(writeText).toHaveBeenCalledWith("post the digest");
     // "Copied" lands only after the clipboard write RESOLVES (a rejected write must
     // not claim success), hence the await.
-    await waitFor(() => expect(copies[0].textContent).toBe("Copied"));
+    await waitFor(() => expect(copies[0].textContent).toBe("已复制"));
     fireEvent.click(copies[1]);
     expect(writeText).toHaveBeenCalledWith("Done — posted to #all-openworker.");
   });
@@ -183,9 +183,20 @@ describe("bubble hover affordances (FB-005)", () => {
 describe("humanizeTool", () => {
   it("prefers run_shell's model-written description and keeps the command as the object", () => {
     const line = humanizeTool("run_shell", { command: "git log --since=yesterday", description: "List yesterday's merges" });
-    expect(line.pre).toBe("Ran ");
+    expect(line.pre).toBe("已运行 ");
     expect(line.obj).toBe("git log --since=yesterday");
-    expect(line.post).toContain("list yesterday's merges");
+    expect(line.post).toContain("List yesterday's merges");
+  });
+
+  it("humanizes core file reads and writes in Chinese", () => {
+    expect(humanizeTool("read_file", { path: "docs/runbook.md" })).toEqual({
+      pre: "已读取 ",
+      obj: "runbook.md",
+    });
+    expect(humanizeTool("write_file", { path: "out/report.md" })).toEqual({
+      pre: "已写入 ",
+      obj: "report.md",
+    });
   });
 
   it("falls back to 'Used <tool> — <short args>' for unknown tools", () => {
@@ -196,9 +207,9 @@ describe("humanizeTool", () => {
 
   it("summarizes todo_write by its single item and status", () => {
     const line = humanizeTool("todo_write", { todos: [{ content: "Post the digest", status: "in_progress" }] });
-    expect(line.pre).toBe("Updated the plan — ");
+    expect(line.pre).toBe("已更新计划 — ");
     expect(line.obj).toContain("Post the digest");
-    expect(line.post).toBe(" → in progress");
+    expect(line.post).toBe(" → 进行中");
   });
 
   it("still renders pre-rename todo_write histories (legacy `items` key)", () => {
