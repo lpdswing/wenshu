@@ -231,6 +231,11 @@ def create_app(manager: SessionManager) -> FastAPI:
     )
     app.state.manager = manager
 
+    def require_feature(name: str) -> JSONResponse | None:
+        if manager.product.features.get(name, False):
+            return None
+        return JSONResponse({"error": "feature disabled"}, status_code=404)
+
     @app.get("/v1/health")
     def health(request: Request) -> dict[str, Any]:
         if api_token and not _request_authenticated(request):
@@ -418,6 +423,10 @@ def create_app(manager: SessionManager) -> FastAPI:
 
     @app.post("/v1/personas/install")
     def install_persona(body: dict) -> dict[str, Any]:
+        if body.get("gallery_slug"):
+            disabled = require_feature("gallery")
+            if disabled is not None:
+                return disabled
         # Returns a consent summary per persona; they land disabled pending the user's approval
         # (then POST /v1/personas/{id} {enabled:true, surfaced:true}).
         reg = manager.personas
@@ -469,6 +478,9 @@ def create_app(manager: SessionManager) -> FastAPI:
     def cloud_gallery_detail(slug: str) -> dict[str, Any]:
         """Solo page for one gallery coworker: publisher pitch + capabilities
         derived locally from the manifest (same parser as install)."""
+        disabled = require_feature("gallery")
+        if disabled is not None:
+            return disabled
         from .. import cloud
         from ..config import load_config
 
@@ -481,6 +493,9 @@ def create_app(manager: SessionManager) -> FastAPI:
     def cloud_gallery() -> dict[str, Any]:
         """Gallery cards for the GUI. Signed out ⇒ ok:false (the gallery is a
         signed-in feature by design; local personas are unaffected)."""
+        disabled = require_feature("gallery")
+        if disabled is not None:
+            return disabled
         from .. import cloud
         from ..config import load_config
 
@@ -951,6 +966,9 @@ def create_app(manager: SessionManager) -> FastAPI:
 
     @app.get("/v1/cloud/status")
     def cloud_status() -> dict[str, Any]:
+        disabled = require_feature("cloud")
+        if disabled is not None:
+            return disabled
         from .. import cloud
 
         return {
@@ -962,6 +980,9 @@ def create_app(manager: SessionManager) -> FastAPI:
     def cloud_telemetry(body: dict) -> dict[str, Any]:
         """The Phase 5 opt-out toggle. Local preference only — signed-out users
         send nothing regardless of this value."""
+        disabled = require_feature("cloud")
+        if disabled is not None:
+            return disabled
         from .. import cloud
 
         return cloud.set_telemetry_enabled(
@@ -972,6 +993,9 @@ def create_app(manager: SessionManager) -> FastAPI:
     def cloud_login() -> dict[str, Any]:
         """Start browser sign-in. The sidecar opens the system browser itself
         (works identically under Tauri and plain-browser dev)."""
+        disabled = require_feature("cloud")
+        if disabled is not None:
+            return disabled
         import webbrowser
 
         from .. import cloud
@@ -983,12 +1007,18 @@ def create_app(manager: SessionManager) -> FastAPI:
 
     @app.post("/v1/cloud/logout")
     def cloud_logout() -> dict[str, Any]:
+        disabled = require_feature("cloud")
+        if disabled is not None:
+            return disabled
         from .. import cloud
 
         return cloud.logout(manager.secrets)
 
     @app.get("/auth/callback")
     async def cloud_auth_callback(code: str = "", state: str = "", error: str = ""):
+        disabled = require_feature("cloud")
+        if disabled is not None:
+            return disabled
         from fastapi.responses import HTMLResponse
 
         from .. import cloud
@@ -1049,6 +1079,9 @@ def create_app(manager: SessionManager) -> FastAPI:
         consent page in the system browser; the broker's callback page will
         form-POST the tokens to /oauth/callback below. `access` picks a consent
         tier by NAME (e.g. hubspot read | write) — the broker owns the scopes."""
+        disabled = require_feature("managed_oauth")
+        if disabled is not None:
+            return disabled
         import webbrowser
 
         from .. import cloud
@@ -1075,6 +1108,9 @@ def create_app(manager: SessionManager) -> FastAPI:
 
     @app.post("/oauth/callback")
     async def managed_oauth_callback(request: Request) -> Any:
+        disabled = require_feature("managed_oauth")
+        if disabled is not None:
+            return disabled
         from fastapi.responses import HTMLResponse
 
         from .. import cloud

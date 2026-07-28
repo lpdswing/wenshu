@@ -5,6 +5,7 @@ addressing, per-team reply tokens. Hermetic: an injected fake relay transport
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 
 import pytest
 
@@ -15,7 +16,9 @@ from coworker.connectors.config import ConnectorSettings, load_settings
 from coworker.connectors.relay_client import SlackRelayAdapter
 from coworker.connectors.slack_addr import qualify, split
 from coworker.connectors.tools import make_send_message_tool
+from coworker.product import current_product
 from coworker.secrets import SecretStore
+from coworker.server import SessionManager
 
 
 @pytest.fixture(autouse=True)
@@ -422,3 +425,85 @@ def test_make_adapter_loads_per_team_tokens():
         relay_url="wss://relay/ws",
     )
     assert adapter._bot_token("T9") == "xoxb-9"
+
+
+class _GatewayTestAdapter:
+    def __init__(self, platform: str):
+        self.platform = platform
+
+    def set_message_handler(self, _handler):
+        pass
+
+    def set_interaction_handler(self, _handler):
+        pass
+
+    async def connect(self):
+        return True
+
+    async def disconnect(self):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_gateway_skips_relay_profiles_when_feature_is_disabled(
+    tmp_path, monkeypatch
+):
+    manager = SessionManager(data_dir=tmp_path)
+    manager.secrets.put("slack:default", {"mode": "relay", "enabled": True})
+    manager.secrets.put(
+        "telegram:default", {"bot_token": "manual-token", "enabled": True}
+    )
+    relay_hubs = []
+    adapter_profiles = {}
+
+    class RecordingRelayHub:
+        def __init__(self, *args):
+            relay_hubs.append(args)
+
+    def recording_adapter(platform, profile, **_kwargs):
+        adapter_profiles[platform] = profile
+        return _GatewayTestAdapter(platform)
+
+    monkeypatch.setattr(relay_client, "RelayHub", RecordingRelayHub)
+    monkeypatch.setattr("coworker.server.manager.make_adapter", recording_adapter)
+    try:
+        started = await manager.start_gateway()
+    finally:
+        await manager.aclose()
+
+    assert relay_hubs == []
+    assert "slack" not in adapter_profiles
+    assert adapter_profiles["telegram"]["bot_token"] == "manual-token"
+    assert started == ["telegram"]
+
+
+@pytest.mark.asyncio
+async def test_gateway_starts_relay_for_an_enabled_product(tmp_path, monkeypatch):
+    product = replace(
+        current_product(),
+        id="openworker",
+        features={**current_product().features, "relay": True},
+    )
+    manager = SessionManager(data_dir=tmp_path, product=product)
+    manager.secrets.put("slack:default", {"mode": "relay", "enabled": True})
+    relay_hubs = []
+    adapter_profiles = {}
+
+    class RecordingRelayHub:
+        def __init__(self, *args):
+            relay_hubs.append(args)
+
+    def recording_adapter(platform, profile, **_kwargs):
+        adapter_profiles[platform] = profile
+        return _GatewayTestAdapter(platform)
+
+    monkeypatch.setattr(relay_client, "RelayHub", RecordingRelayHub)
+    monkeypatch.setattr("coworker.server.manager.make_adapter", recording_adapter)
+    try:
+        started = await manager.start_gateway()
+    finally:
+        await manager.aclose()
+
+    assert len(relay_hubs) == 1
+    assert adapter_profiles["slack"]["mode"] == "relay"
+    assert started == ["slack"]

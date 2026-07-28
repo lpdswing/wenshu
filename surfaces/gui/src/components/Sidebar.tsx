@@ -15,6 +15,7 @@ import {
   waitForCloudSignIn,
   type Automation,
   type CloudStatus,
+  type ProductInfo,
   type Persona,
   type RecentWorkspace,
   type SurfaceVisibility,
@@ -116,6 +117,7 @@ interface Props {
   agent: string;
   workspace: string;
   surfaces: SurfaceVisibility;
+  features: ProductInfo["features"];
   sessions: SessionInfo[];
   projects: RecentWorkspace[];
   activeSession: string;
@@ -171,33 +173,47 @@ const compactAge = (iso?: string | null): string => {
 // Sessions shown per group before "Show more" comes from Settings (sessions_peek, default 5).
 
 export function Sidebar(props: Props) {
+  const cloudEnabled = props.features.cloud === true;
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [appMenuOpen, setAppMenuOpen] = useState(false);
   // The account row (§26): cloud sign-in status drives the avatar/name/dot; refreshed on
   // focus and whenever the menu opens (sign-in completes out-of-band in the browser).
   const [cloud, setCloud] = useState<CloudStatus | null>(null);
+  const cloudSignedIn = cloudEnabled && cloud?.signed_in === true;
   // Inbox chip sticky unlock (§26): absent until the product first parks an item (or a
   // session first goes Unattended), then permanent. Per-device, like nav collapse.
   const [inboxUnlocked, setInboxUnlocked] = useState(
     () => localStorage.getItem("ocw:inbox-unlocked") === "1",
   );
-  const refreshCloud = () => getCloudStatus().then(setCloud).catch(() => {});
+  const refreshCloud = () => {
+    if (!cloudEnabled) {
+      setCloud(null);
+      return Promise.resolve();
+    }
+    return getCloudStatus().then(setCloud).catch(() => {});
+  };
   useEffect(() => {
-    refreshCloud();
     const onFocus = () => refreshCloud();
-    window.addEventListener("focus", onFocus);
-    window.addEventListener(CLOUD_CHANGED, onFocus);
+    if (cloudEnabled) {
+      refreshCloud();
+      window.addEventListener("focus", onFocus);
+      window.addEventListener(CLOUD_CHANGED, onFocus);
+    } else {
+      setCloud(null);
+    }
     const unlock = () => {
       localStorage.setItem("ocw:inbox-unlocked", "1");
       setInboxUnlocked(true);
     };
     window.addEventListener(INBOX_UNLOCK, unlock);
     return () => {
-      window.removeEventListener("focus", onFocus);
-      window.removeEventListener(CLOUD_CHANGED, onFocus);
+      if (cloudEnabled) {
+        window.removeEventListener("focus", onFocus);
+        window.removeEventListener(CLOUD_CHANGED, onFocus);
+      }
       window.removeEventListener(INBOX_UNLOCK, unlock);
     };
-  }, []);
+  }, [cloudEnabled]);
   // UX-023: automations feed the nav row's badge + the Scheduled band. The 15s poll
   // is the baseline; mutations announce AUTOMATIONS_CHANGED for an instant refresh
   // (mark-seen must clear the badge the moment the detail opens).
@@ -370,7 +386,7 @@ export function Sidebar(props: Props) {
 
   // Display identity for the account row: the cloud profile only carries the email, so the
   // row shows the capitalized local part ("rohit@…" → "Rohit"); the menu header shows it all.
-  const accountEmail = cloud?.signed_in ? cloud.account : "";
+  const accountEmail = cloudSignedIn ? cloud?.account ?? "" : "";
   const accountName = accountEmail
     ? accountEmail.split("@")[0].replace(/^./, (c) => c.toUpperCase())
     : "";
@@ -1136,7 +1152,7 @@ export function Sidebar(props: Props) {
                 data-testid="account-menu"
                 role="menu"
               >
-                {cloud?.signed_in ? (
+                {cloudEnabled && (cloudSignedIn ? (
                   <div
                     className="px-3 py-1.5 mb-1 text-[11px] text-faint truncate border-b border-line"
                     title={`${accountEmail} · OpenWorker Cloud`}
@@ -1168,7 +1184,7 @@ export function Sidebar(props: Props) {
                       Cloud
                     </button>
                   </>
-                )}
+                ))}
                 {appMenuItem(
                   "inbox",
                   "Inbox",
@@ -1187,7 +1203,7 @@ export function Sidebar(props: Props) {
                 )}
                 {appMenuItem("clock", "Automations", props.onOpenScheduled, props.scheduledActive)}
                 {appMenuItem("audit", "Activity", props.onOpenAudit, props.auditActive)}
-                {cloud?.signed_in && (
+                {cloudSignedIn && (
                   <>
                     <div className="h-px bg-line my-1 mx-2" />
                     {appMenuItem("signOut", "Sign out", async () => {
@@ -1207,28 +1223,36 @@ export function Sidebar(props: Props) {
             }
             data-testid="account-row"
             onClick={() => {
-              if (!appMenuOpen) refreshCloud();
+              if (!appMenuOpen && cloudEnabled) refreshCloud();
               setAppMenuOpen((v) => !v);
             }}
             aria-haspopup="menu"
             aria-expanded={appMenuOpen}
-            aria-label={cloud?.signed_in ? `Account: ${accountEmail}` : "Account: not signed in"}
+            aria-label={
+              cloudSignedIn
+                ? `Account: ${accountEmail}`
+                : cloudEnabled
+                  ? "Account: not signed in"
+                  : "Open application menu"
+            }
           >
             <span
               className={
                 "w-6 h-6 rounded-full grid place-items-center text-[10.5px] font-semibold shrink-0 " +
-                (cloud?.signed_in
+                (cloudSignedIn
                   ? "bg-accentSoft text-accent"
-                  : "bg-paper text-faint border border-line")
+                  : cloudEnabled
+                    ? "bg-paper text-faint border border-line"
+                    : "bg-accentSoft text-accent")
               }
               aria-hidden
             >
-              {cloud?.signed_in ? accountName.slice(0, 1).toUpperCase() : "?"}
+              {cloudSignedIn ? accountName.slice(0, 1).toUpperCase() : cloudEnabled ? "?" : "O"}
             </span>
-            <span className={"truncate " + (cloud?.signed_in ? "" : "text-muted")}>
-              {cloud?.signed_in ? accountName : "Not signed in"}
+            <span className={"truncate " + (cloudEnabled && !cloudSignedIn ? "text-muted" : "")}>
+              {cloudSignedIn ? accountName : cloudEnabled ? "Not signed in" : "OpenWorker"}
             </span>
-            {cloud?.signed_in && (
+            {cloudSignedIn && (
               <span
                 className="w-[7px] h-[7px] rounded-full bg-ok shrink-0"
                 title="Signed in to OpenWorker Cloud"

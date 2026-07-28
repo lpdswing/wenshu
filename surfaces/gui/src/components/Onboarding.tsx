@@ -6,6 +6,7 @@ import {
   getConnectors,
   setOnboarded,
   type CloudStatus,
+  type ProductInfo,
   type Connector,
 } from "../api";
 import { ConnectorBadge } from "../connectors/ConnectorIcon";
@@ -37,7 +38,15 @@ const TOOL_ROWS = [
 ];
 const TOOLS_SOON = ["gmail", "google_calendar"];
 
-export function Onboarding({ onDone }: { onDone: (next?: "work" | "gallery" | "automations") => void }) {
+export function Onboarding({
+  features,
+  onDone,
+}: {
+  features: ProductInfo["features"];
+  onDone: (next?: "work" | "gallery" | "automations") => void;
+}) {
+  const cloudEnabled = features.cloud === true;
+  const managedOAuthEnabled = features.managed_oauth === true;
   const [step, setStep] = useState(0);
 
   // -- step 1: model (provider gallery ⇄ key form, shared machinery) ---------------
@@ -72,13 +81,15 @@ export function Onboarding({ onDone }: { onDone: (next?: "work" | "gallery" | "a
     if (step !== 1) return;
     const load = () => {
       getConnectors().then(setConnectors).catch(() => {});
-      getCloudStatus().then(setCloud).catch(() => {});
+      if (cloudEnabled) getCloudStatus().then(setCloud).catch(() => {});
     };
+    if (!cloudEnabled) setCloud(null);
     load();
-    const fast = signinPhase === "waiting" || pendingTool !== null;
+    const fast =
+      cloudEnabled && (signinPhase === "waiting" || pendingTool !== null);
     const t = setInterval(load, fast ? 750 : 3000);
     return () => clearInterval(t);
-  }, [step, signinPhase, pendingTool]);
+  }, [step, signinPhase, pendingTool, cloudEnabled]);
 
   // The poll flips the card to ✓ when the consent lands.
   useEffect(() => {
@@ -87,6 +98,7 @@ export function Onboarding({ onDone }: { onDone: (next?: "work" | "gallery" | "a
   }, [connectors, pendingTool]);
 
   const startTool = async (name: string) => {
+    if (!managedOAuthEnabled) return;
     setPendingTool(name); // replaces any previous pending connect
     const res = await connectManaged(
       name,
@@ -193,7 +205,9 @@ export function Onboarding({ onDone }: { onDone: (next?: "work" | "gallery" | "a
                       <span className="block text-[13.5px] font-semibold leading-tight">{benefit}</span>
                       <span className="block text-[12px] text-muted truncate">{detail}</span>
                     </span>
-                    {cloud?.signed_in &&
+                    {cloudEnabled &&
+                      managedOAuthEnabled &&
+                      cloud?.signed_in &&
                       (c.connected ? (
                         <span className="text-[12px] text-ok font-medium shrink-0">✓ Connected</span>
                       ) : pendingTool === name ? (
@@ -209,88 +223,99 @@ export function Onboarding({ onDone }: { onDone: (next?: "work" | "gallery" | "a
                   </div>
                 );
               })}
-              {/* The gated Google pair: one combined grayed row, both states (§41). */}
-              <div className="flex items-center gap-3 py-2" data-testid="ob-tool-google-soon">
-                <span className="flex gap-1.5 opacity-40 grayscale">
-                  {TOOLS_SOON.map((n) => {
-                    const c = connectors.find((x) => x.name === n);
-                    return c ? <ConnectorBadge key={n} connector={c} size={28} title={c.title} /> : null;
-                  })}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[13.5px] font-semibold leading-tight text-faint">
-                    Gmail &amp; Google Calendar
+              {TOOLS_SOON.some((name) => connectors.some((c) => c.name === name)) && (
+                <div className="flex items-center gap-3 py-2" data-testid="ob-tool-google-soon">
+                  <span className="flex gap-1.5 opacity-40 grayscale">
+                    {TOOLS_SOON.map((name) => {
+                      const connector = connectors.find((c) => c.name === name);
+                      return connector ? (
+                        <ConnectorBadge
+                          key={name}
+                          connector={connector}
+                          size={28}
+                          title={connector.title}
+                        />
+                      ) : null;
+                    })}
                   </span>
-                  <span className="block text-[12px] text-faint truncate">
-                    Coming soon — pending Google&rsquo;s app verification.
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[13.5px] font-semibold leading-tight text-faint">
+                      Gmail &amp; Google Calendar
+                    </span>
+                    <span className="block text-[12px] text-faint truncate">
+                      Coming soon — pending Google&rsquo;s app verification.
+                    </span>
                   </span>
-                </span>
-                {cloud?.signed_in && <span className="text-[11.5px] text-faint shrink-0">Coming soon</span>}
-              </div>
+                  {cloudEnabled && cloud?.signed_in && (
+                    <span className="text-[11.5px] text-faint shrink-0">Coming soon</span>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* The band is PINNED outside the scroll area and its slot never moves: the ask
                 pre-sign-in, a green congrats after — zero layout shift at the moment the user
                 returns from the browser (§41). */}
-            {!cloud?.signed_in ? (
-              <div className="mt-3.5 rounded-xl border border-line bg-paper px-4 py-3 flex items-center gap-3.5 shrink-0">
-                <span className="flex-1 text-[12.5px] text-muted leading-snug">
-                  <span className="block text-[13px] font-semibold text-ink mb-0.5">
-                    Sign in for one-click connections
+            {cloudEnabled &&
+              (!cloud?.signed_in ? (
+                <div className="mt-3.5 rounded-xl border border-line bg-paper px-4 py-3 flex items-center gap-3.5 shrink-0">
+                  <span className="flex-1 text-[12.5px] text-muted leading-snug">
+                    <span className="block text-[13px] font-semibold text-ink mb-0.5">
+                      Sign in for one-click connections
+                    </span>
+                    OpenWorker handles the OAuth for 20+ tools — no dev consoles, no pasted keys.
+                    Tokens stay on this Mac.
                   </span>
-                  OpenWorker handles the OAuth for 20+ tools — no dev consoles, no pasted keys.
-                  Tokens stay on this Mac.
-                </span>
-                {signinPhase ? (
-                  <span className="inline-flex items-center gap-2 text-[12.5px] text-muted shrink-0">
-                    <Spinner />
-                    {signinPhase === "opening" ? (
-                      "Opening browser…"
-                    ) : (
-                      <>
-                        Waiting…{" "}
-                        <button
-                          className="underline hover:text-ink"
-                          onClick={() => setSigninPhase(null)}
-                          data-testid="ob-signin-cancel"
-                        >
-                          Cancel
-                        </button>
-                      </>
-                    )}
+                  {signinPhase ? (
+                    <span className="inline-flex items-center gap-2 text-[12.5px] text-muted shrink-0">
+                      <Spinner />
+                      {signinPhase === "opening" ? (
+                        "Opening browser…"
+                      ) : (
+                        <>
+                          Waiting…{" "}
+                          <button
+                            className="underline hover:text-ink"
+                            onClick={() => setSigninPhase(null)}
+                            data-testid="ob-signin-cancel"
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      )}
+                    </span>
+                  ) : (
+                    <button
+                      className="shrink-0 px-5 py-2 rounded-full bg-ink text-panel text-[13px]"
+                      onClick={async () => {
+                        setSigninPhase("opening");
+                        await cloudLogin().catch(() => {});
+                        setSigninPhase("waiting");
+                      }}
+                      data-testid="ob-cloud-signin"
+                    >
+                      Sign in
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div
+                  className="mt-3.5 rounded-xl border border-line bg-okSoft px-4 py-3 shrink-0"
+                  data-testid="ob-tools-signedin"
+                >
+                  <span className="block text-[13px] font-semibold text-ok mb-0.5">
+                    🎉 You&rsquo;re signed in{cloud.account ? ` as ${cloud.account}` : ""}
                   </span>
-                ) : (
-                  <button
-                    className="shrink-0 px-5 py-2 rounded-full bg-ink text-panel text-[13px]"
-                    onClick={async () => {
-                      setSigninPhase("opening");
-                      await cloudLogin().catch(() => {});
-                      setSigninPhase("waiting");
-                    }}
-                    data-testid="ob-cloud-signin"
-                  >
-                    Sign in
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div
-                className="mt-3.5 rounded-xl border border-line bg-okSoft px-4 py-3 shrink-0"
-                data-testid="ob-tools-signedin"
-              >
-                <span className="block text-[13px] font-semibold text-ok mb-0.5">
-                  🎉 You&rsquo;re signed in{cloud.account ? ` as ${cloud.account}` : ""}
-                </span>
-                <span className="block text-[12.5px] text-muted">
-                  Connect a tool above with one click — or add them anytime later from the
-                  Connectors page.
-                </span>
-              </div>
-            )}
+                  <span className="block text-[12.5px] text-muted">
+                    Connect a tool above with one click — or add them anytime later from the
+                    Connectors page.
+                  </span>
+                </div>
+              ))}
 
             {/* One footer button, one slot: quiet skip pre-sign-in, black Next after. */}
             <div className="flex items-center mt-3.5">
-              {cloud?.signed_in ? (
+              {cloudEnabled && cloud?.signed_in ? (
                 <button
                   className="ml-auto px-6 py-2 rounded-full bg-ink text-panel text-[13px] shrink-0"
                   onClick={() => setStep(2)}
@@ -300,11 +325,16 @@ export function Onboarding({ onDone }: { onDone: (next?: "work" | "gallery" | "a
                 </button>
               ) : (
                 <button
-                  className="ml-auto px-5 py-2 rounded-full border border-line text-[13px] text-muted hover:text-ink hover:border-lineStrong shrink-0"
+                  className={
+                    "ml-auto px-5 py-2 rounded-full text-[13px] shrink-0 " +
+                    (cloudEnabled
+                      ? "border border-line text-muted hover:text-ink hover:border-lineStrong"
+                      : "bg-ink text-panel")
+                  }
                   onClick={() => setStep(2)}
-                  data-testid="ob-tools-skip"
+                  data-testid={cloudEnabled ? "ob-tools-skip" : "ob-continue-tools"}
                 >
-                  Continue without sign-in
+                  {cloudEnabled ? "Continue without sign-in" : "Next"}
                 </button>
               )}
             </div>

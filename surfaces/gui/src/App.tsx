@@ -24,6 +24,7 @@ import {
   type InboxItem,
   type MessageSource,
   type Persona,
+  type ProductInfo,
   type RecentWorkspace,
   type SurfaceVisibility,
   type WorkspaceCommandTrust,
@@ -151,6 +152,7 @@ export function App() {
     useState<WorkspaceCommandTrust | null>(null);
   const [agent, setAgent] = useState("cowork");
   const [model, setModel] = useState("gpt-5.6-sol");
+  const [product, setProduct] = useState<ProductInfo | null>(null);
   const [models, setModels] = useState<string[]>([]);
   const [modelLabels, setModelLabels] = useState<Record<string, string>>({});
   const [surfaces, setSurfaces] = useState<SurfaceVisibility>({ cowork: true, chat: false, code: false });
@@ -428,6 +430,7 @@ export function App() {
         .then(async (h) => {
           if (cancelled) return;
           setModel(h.model);
+          setProduct(h.product);
           // First-run setup wizard (desktop): show until the user completes/dismisses it.
           if (isTauri()) {
             getSettings()
@@ -1107,6 +1110,8 @@ export function App() {
   const activeInfo = sessions.find((s) => s.session_id === sessionId);
   const activeTitle = activeInfo?.title || "New session";
 
+  const productFeatures = product?.features ?? {};
+
   const desktop = isTauri();
   // Dev-only: `?overlay=1` simulates the desktop overlay layout in the browser (adds the
   // tauri-overlay class + draws fake traffic lights at the real position) so the top-left can be
@@ -1167,7 +1172,7 @@ export function App() {
         </div>
       )}
       {/* Desktop-only auto-update prompt (15s after boot, then every 30 min; inert in browser). */}
-      <UpdateBanner />
+      {productFeatures.updater === true && <UpdateBanner />}
       {/* UX-026: automation-start toast — quiet panel, neutral dot/drain, accent only
           on the action (rev 2); auto-dismisses with the 5s drain bar. */}
       {runToast && (
@@ -1231,11 +1236,17 @@ export function App() {
       )}
       {onboarding && (
         <Onboarding
+          features={productFeatures}
           onDone={(next) => {
             setOnboarding(false);
-            getHealth().then((h) => setModel(h.model)).catch(() => {});
+            getHealth()
+              .then((h) => {
+                setModel(h.model);
+                setProduct(h.product);
+              })
+              .catch(() => {});
             loadSettings(); // pick up a model connected during setup (clears the composer chip)
-            if (next === "gallery") {
+            if (next === "gallery" && productFeatures.gallery === true) {
               // The specialists tip: land on Settings ▸ Personas, where the Gallery link lives.
               openSettings("personas");
             } else if (next === "automations") {
@@ -1254,6 +1265,7 @@ export function App() {
         agent={agent}
         workspace={workspace || ""}
         surfaces={surfaces}
+        features={productFeatures}
         sessions={sessions}
         projects={projects}
         activeSession={sessionId}
@@ -1298,6 +1310,7 @@ export function App() {
         <SettingsView
           key={settingsTab}
           initialTab={settingsTab}
+          galleryEnabled={productFeatures.gallery === true}
           onOpenPersona={(id) => openPersona(id, "settings")}
         />
       ) : surface === "audit" ? (

@@ -2290,45 +2290,53 @@ class SessionManager:
             interaction_handler=self._on_interaction,
             on_unauthorized=self._park_unauthorized,
         )
-        # Managed Slack relay wiring (only used when a connector picks relay mode):
-        # the cloud sign-in JWT authorizes the relay WebSocket, and the relay
-        # endpoint comes from config. Both are lazy — Socket Mode needs neither.
-        from ..cloud import fresh_access_token
-        from ..config import load_config
-
-        cloud_config = load_config()
-
-        def _relay_token() -> str:
-            return fresh_access_token(self.secrets, cloud_config) or ""
-
-        # Every relay-mode platform shares ONE cloud socket; the hub fans frames
-        # out by provider tag. Built lazily on the first relay adapter.
-        relay_ws_url = getattr(cloud_config, "cloud_relay_ws_url", "") or None
+        relay_enabled = self.product.features.get("relay", False)
+        relay_ws_url = None
         relay_hub = None
-        if relay_ws_url:
+        relay_token_provider = None
+        github_token_client = None
+        if relay_enabled:
+            # Managed platforms share one cloud socket. Everything stays lazy:
+            # manual adapters neither import cloud helpers nor create a RelayHub.
+            from ..cloud import fresh_access_token, github_installation_token
+            from ..config import load_config
             from ..connectors.relay_client import RelayHub
 
-            relay_hub = RelayHub(relay_ws_url, _relay_token)
+            cloud_config = load_config()
 
-        async def _github_token(installation_id: str) -> str:
-            from ..cloud import github_installation_token
+            def _relay_token() -> str:
+                return fresh_access_token(self.secrets, cloud_config) or ""
 
-            return await asyncio.to_thread(
-                github_installation_token, self.secrets, cloud_config, installation_id
-            )
+            async def _github_token(installation_id: str) -> str:
+                return await asyncio.to_thread(
+                    github_installation_token,
+                    self.secrets,
+                    cloud_config,
+                    installation_id,
+                )
+
+            relay_ws_url = getattr(cloud_config, "cloud_relay_ws_url", "") or None
+            if relay_ws_url:
+                relay_hub = RelayHub(relay_ws_url, _relay_token)
+            relay_token_provider = _relay_token
+            github_token_client = _github_token
 
         for platform, st in settings.items():
             if not st.enabled:
                 continue
             profile = self.secrets.get(f"{platform}:default") or {}
+            if not relay_enabled and (
+                profile.get("mode") == "relay" or profile.get("managed")
+            ):
+                continue
             adapter = make_adapter(
                 platform,
                 profile,
                 secrets=self.secrets,
-                token_provider=_relay_token,
+                token_provider=relay_token_provider,
                 relay_url=relay_ws_url,
                 relay_hub=relay_hub,
-                github_token_client=_github_token,
+                github_token_client=github_token_client,
             )
             if adapter is not None:
                 self.gateway.register(adapter)

@@ -1,4 +1,5 @@
 import { test as base, expect, type Page } from "@playwright/test";
+import type { ProductInfo } from "../src/api";
 
 // The app-wide /ws/events socket each page opened (UX-026 toast et al.) — specs
 // push server events through it via sendAppEvent below.
@@ -20,7 +21,27 @@ export async function sendAppEvent(page: Page, obj: unknown): Promise<void> {
 // (sessions, personas, inbox, routing, channel subscriptions) are held in per-test in-memory state
 // so add/remove/toggle reflect through the real UI on re-fetch.
 
-const HEALTH = { status: "ok", default_workspace: null, model: "anthropic:claude-opus-4-8" };
+export const WENSHU_PRODUCT: ProductInfo = {
+  id: "wenshu",
+  name: "文枢",
+  display_name: "文枢 WenShu",
+  default_persona: "cowork",
+  visible_connectors: ["browser", "wechat_official"],
+  features: {
+    cloud: false,
+    gallery: false,
+    managed_oauth: false,
+    relay: false,
+    updater: false,
+  },
+};
+
+const HEALTH = {
+  status: "ok",
+  default_workspace: null,
+  model: "anthropic:claude-opus-4-8",
+  product: WENSHU_PRODUCT,
+};
 
 const SETTINGS = {
   provider: "openai",
@@ -156,6 +177,25 @@ const CONNECTORS = {
     { name: "monday", title: "monday.com", icon: "▦", blurb: "Read boards and items, track work, create items and post updates.", aliases: ["project management", "tasks", "boards"], auth: "oauth", two_way: false, channels: false, available: true, brand_color: "#6161ff", logo: "monday", mcp: true, fields: [], instructions: ["One click connects via monday.com sign-in in your browser.", "Sign-in is fully local — tokens stay on this Mac."], connected: false, account: null, enabled: false, allowed_users: [], tools: [{ name: "mcp__monday__get_board_info", label: "Read board", kind: "read", description: "Read a board's columns and groups.", enabled: true, requires_approval: false }, { name: "mcp__monday__create_item", label: "Create item", kind: "write", description: "Create an item on a board.", enabled: true, requires_approval: true }], managed: false, managed_profile: false },
     { name: "jira", title: "Jira", icon: "◆", blurb: "Search, summarize, create, and update issues.", aliases: ["issues", "tickets", "atlassian"], auth: "api_token", two_way: false, channels: false, available: true, brand_color: "#0052cc", logo: "jira", mcp: true, fields: [{ key: "base_url", label: "Atlassian site URL", secret: false, required: true, help: "", placeholder: "" }, { key: "email", label: "Account email", secret: false, required: true, help: "", placeholder: "" }, { key: "api_token", label: "API token", secret: true, required: true, help: "", placeholder: "" }], instructions: [], connected: false, account: null, enabled: false, allowed_users: [], tools: [], managed: false, managed_profile: false },
   ],
+};
+
+export const OPENWORKER_PRODUCT: ProductInfo = {
+  id: "openworker",
+  name: "OpenWorker",
+  display_name: "OpenWorker",
+  default_persona: "cowork",
+  visible_connectors: [
+    "slack",
+    "github",
+    ...CONNECTORS.connectors.map(({ name }) => name),
+  ],
+  features: {
+    cloud: true,
+    gallery: true,
+    managed_oauth: true,
+    relay: true,
+    updater: true,
+  },
 };
 
 // Two pending items across two personas: drives the Inbox kind tabs, the persona filter chips
@@ -337,7 +377,10 @@ const PROVIDERS = [
 ];
 
 /** Install the API + WebSocket mocks on a page. Returns handles for assertions/seed data. */
-export async function mockApi(page: import("@playwright/test").Page) {
+export async function mockApi(
+  page: Page,
+  product: ProductInfo = OPENWORKER_PRODUCT,
+) {
   const subscriptions: any[] = [
     // One existing subscription (a non-pinned session) so the Slack page's per-workspace
     // "Listening" row has an entry. Relay-mode channels are team-qualified (slack:T…/C…).
@@ -808,7 +851,7 @@ export async function mockApi(page: import("@playwright/test").Page) {
       return json(i >= 0 ? sessions[i] : PINNED_SESSION);
     }
 
-    if (p.endsWith("/v1/health")) return json(HEALTH);
+    if (p.endsWith("/v1/health")) return json({ ...HEALTH, product });
     if (p.endsWith("/v1/settings")) return json(SETTINGS);
     if (p.endsWith("/v1/settings/pdf") && m === "POST") {
       Object.assign(SETTINGS, req.postDataJSON());
@@ -1107,28 +1150,29 @@ export async function mockApi(page: import("@playwright/test").Page) {
         hubspotState.hidden_fields = b.hidden_fields.map((f: string) => f.trim().toLowerCase());
       return json({ ok: true, hidden_fields: [...hubspotState.hidden_fields] });
     }
-    if (p.endsWith("/v1/connectors"))
-      return json({
-        connectors: [
-          slackConnector(),
-          githubConnector(),
-          ...CONNECTORS.connectors.map((c: any) =>
-            c.name === "gmail"
-              ? gmailConnector()
-              : c.name === "google_calendar"
-                ? gcalConnector()
-                : c.name === "hubspot"
-                  ? hubspotConnector()
-                  : c.name === "notion"
-                    ? notionConnector()
-                    : c.name === "outlook"
-                      ? outlookConnector()
-                      : c.name === "monday" || c.name === "jira"
-                        ? mcpConnector(c.name)
-                        : { ...c },
-          ),
-        ],
-      });
+    if (p.endsWith("/v1/connectors")) {
+      const connectors = [
+        slackConnector(),
+        githubConnector(),
+        ...CONNECTORS.connectors.map((c) =>
+          c.name === "gmail"
+            ? gmailConnector()
+            : c.name === "google_calendar"
+              ? gcalConnector()
+              : c.name === "hubspot"
+                ? hubspotConnector()
+                : c.name === "notion"
+                  ? notionConnector()
+                  : c.name === "outlook"
+                    ? outlookConnector()
+                    : c.name === "monday" || c.name === "jira"
+                      ? mcpConnector(c.name)
+                      : { ...c },
+        ),
+      ];
+      const visible = new Set(product.visible_connectors);
+      return json({ connectors: connectors.filter((c) => visible.has(c.name)) });
+    }
     if (p.endsWith("/v1/cloud/status")) return json({ ...CLOUD_STATE });
     if (p.endsWith("/v1/cloud/login") && m === "POST") {
       Object.assign(CLOUD_STATE, { signed_in: true, account: "rohit@openworker.com", user_id: "usr_e2e" });
@@ -1486,6 +1530,15 @@ export async function mockApi(page: import("@playwright/test").Page) {
 export const test = base.extend({
   page: async ({ page }, use) => {
     await mockApi(page);
+    await use(page);
+  },
+});
+
+// WenShu's production profile is opt-in here so legacy feature suites can keep
+// exercising the injectable all-features profile through `test`.
+export const wenshuTest = base.extend({
+  page: async ({ page }, use) => {
+    await mockApi(page, WENSHU_PRODUCT);
     await use(page);
   },
 });

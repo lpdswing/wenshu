@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from fastapi.testclient import TestClient
 
+from coworker.product import current_product
 from coworker.server import SessionManager, create_app
 
 
@@ -18,11 +21,92 @@ def _allow_managed_state(state: str = "s") -> None:
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("COWORKER_STATE_DIR", str(tmp_path / "state"))
+    product = replace(
+        current_product(),
+        id="openworker",
+        visible_connectors=current_product().visible_connectors
+        | {"gmail", "notion", "telegram"},
+        features={name: True for name in current_product().features},
+    )
+    manager = SessionManager(workspace=tmp_path, product=product)
+    app = create_app(manager)
+    with TestClient(app) as c:
+        c.manager = manager
+        yield c
+
+
+@pytest.fixture
+def wenshu_client(tmp_path, monkeypatch):
+    monkeypatch.setenv("COWORKER_STATE_DIR", str(tmp_path / "state"))
     manager = SessionManager(workspace=tmp_path)
     app = create_app(manager)
     with TestClient(app) as c:
         c.manager = manager
         yield c
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "kwargs"),
+    [
+        ("get", "/v1/cloud/status", {}),
+        ("post", "/v1/cloud/telemetry", {"json": {"enabled": False}}),
+        ("post", "/v1/cloud/login", {}),
+        ("post", "/v1/cloud/logout", {}),
+        ("get", "/auth/callback", {"params": {"code": "c", "state": "s"}}),
+        ("get", "/v1/cloud/gallery", {}),
+        ("get", "/v1/cloud/gallery/sales", {}),
+        ("post", "/v1/personas/install", {"json": {"gallery_slug": "sales"}}),
+        ("post", "/v1/connectors/notion/connect-managed", {}),
+        (
+            "post",
+            "/oauth/callback",
+            {
+                "data": {
+                    "connector": "notion",
+                    "access_token": "token",
+                    "app_state": "s",
+                }
+            },
+        ),
+    ],
+)
+def test_upstream_routes_are_disabled_for_wenshu(
+    wenshu_client, method, path, kwargs
+):
+    response = getattr(wenshu_client, method)(path, **kwargs)
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "feature disabled"}
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "cloud_call", "kwargs"),
+    [
+        ("post", "/v1/cloud/login", "begin_login", {}),
+        ("get", "/auth/callback", "complete_login", {"params": {"code": "c"}}),
+        ("get", "/v1/cloud/gallery", "gallery_list", {}),
+        (
+            "post",
+            "/v1/connectors/notion/connect-managed",
+            "begin_managed_connect",
+            {},
+        ),
+    ],
+)
+def test_disabled_routes_return_before_upstream_calls(
+    wenshu_client, monkeypatch, method, path, cloud_call, kwargs
+):
+    from coworker import cloud
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError(f"{cloud_call} must not run")
+
+    monkeypatch.setattr(cloud, cloud_call, forbidden)
+
+    response = getattr(wenshu_client, method)(path, **kwargs)
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "feature disabled"}
 
 
 def test_cloud_status_signed_out(client):

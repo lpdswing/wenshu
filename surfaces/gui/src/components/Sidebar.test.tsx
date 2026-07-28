@@ -40,6 +40,7 @@ const baseProps = {
   agent: "cowork",
   workspace: "",
   surfaces: { cowork: true, chat: false, code: false },
+  features: { cloud: true, gallery: true, managed_oauth: true, relay: true, updater: true },
   sessions: SESSIONS,
   projects: [],
   activeSession: "s-cowork-1",
@@ -261,5 +262,39 @@ describe("New-session split button", () => {
     const menu = (await screen.findByText("Start a session as")).closest(".newsplit-menu") as HTMLElement;
     expect(within(menu).getByText("Ops")).toBeTruthy();
     expect(within(menu).queryByText("Manage personas…")).toBeNull();
+  });
+});
+
+describe("product feature gates", () => {
+  it("keeps the local application menu but never fetches or renders Cloud when disabled", async () => {
+    const calls = stubFetch([
+      { match: "/v1/personas", method: "GET", json: PERSONAS },
+      { match: "/v1/settings", method: "GET", json: { nav_layout: "flat" } },
+      {
+        match: "/v1/cloud/status",
+        method: "GET",
+        json: { signed_in: false, account: "", user_id: "" },
+      },
+    ]);
+
+    render(
+      <Sidebar
+        {...baseProps}
+        features={{
+          cloud: false,
+          gallery: false,
+          managed_oauth: false,
+          relay: false,
+          updater: false,
+        }}
+      />,
+    );
+
+    const row = await screen.findByTestId("account-row");
+    fireEvent.click(row);
+
+    expect(screen.queryByTestId("account-sign-in")).toBeNull();
+    expect(screen.getByRole("button", { name: "Connectors" })).toBeTruthy();
+    expect(calls.some((call) => call.url.includes("/v1/cloud/"))).toBe(false);
   });
 });
