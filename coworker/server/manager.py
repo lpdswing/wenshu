@@ -72,6 +72,7 @@ from ..mcp import (
 from ..memory import MemoryStore, Scope, SQLiteMemoryStore
 from ..permissions import Mode
 from ..agents import list_agents as _list_agents
+from ..product import ProductProfile, current_product
 from ..providers import (
     ProviderClient,
     ProviderRouter,
@@ -113,6 +114,7 @@ class SessionManager:
         model: str = "gpt-5.6-sol",
         mode: Mode = Mode.INTERACTIVE,
         provider: Optional[ProviderClient] = None,
+        product: ProductProfile | None = None,
     ) -> None:
         self.default_workspace = (
             str(Path(workspace).expanduser().resolve()) if workspace else None
@@ -120,6 +122,7 @@ class SessionManager:
         self.model = model
         self.mode = mode
         self.provider = provider
+        self.product = product or current_product()
 
         if data_dir is not None:
             base = Path(data_dir).expanduser()

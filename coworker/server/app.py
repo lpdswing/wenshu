@@ -239,6 +239,7 @@ def create_app(manager: SessionManager) -> FastAPI:
             "status": "ok",
             "default_workspace": manager.default_workspace,
             "model": manager.model,
+            "product": manager.product.to_dict(),
         }
 
     @app.get("/v1/agents")

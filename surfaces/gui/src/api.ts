@@ -37,10 +37,20 @@ const openWebSocket = (url: string): WebSocket => {
     : new WebSocket(url);
 };
 
+export interface ProductInfo {
+  id: string;
+  name: string;
+  display_name: string;
+  default_persona: string;
+  visible_connectors: string[];
+  features: Record<string, boolean>;
+}
+
 export interface Health {
   status: string;
   default_workspace: string | null;
   model: string;
+  product: ProductInfo;
 }
 
 export interface RecentWorkspace {
