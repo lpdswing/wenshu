@@ -197,10 +197,14 @@ def build_engine(
     # Messaging personas (Cowork / Ops / MyHelper) expose send_message; MyHelper also uses it as
     # the reply path for inbound Telegram/Slack super-agent sessions.
     secrets = secrets or SecretStore()
-    writable_roots = [root.path for root in root_list if root.writable]
-    if agent.family == "knowledge" and writable_roots:
+    if agent.family == "knowledge" and any(root.writable for root in root_list):
         registry.register(
-            make_generate_image_tool(secrets=secrets, roots=writable_roots)
+            make_generate_image_tool(
+                secrets=secrets,
+                roots=lambda: (
+                    root.path for root in root_list if root.writable
+                ),
+            )
         )
     messaging_enabled = any(
         setting.enabled

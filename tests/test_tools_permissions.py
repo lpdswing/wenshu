@@ -254,3 +254,35 @@ def test_generate_image_tool_rejects_output_outside_roots_before_provider_build(
         )
     assert built == []
 
+
+
+def test_generate_image_tool_rechecks_live_writable_roots(tmp_path, monkeypatch):
+    from coworker.image_generation import tools as image_tools
+    from coworker.secrets import SecretStore
+
+    primary = tmp_path / "primary"
+    revoked = tmp_path / "revoked"
+    primary.mkdir()
+    revoked.mkdir()
+    live_roots = [primary, revoked]
+    built = []
+    monkeypatch.setattr(
+        image_tools,
+        "build_image_provider",
+        lambda secrets: built.append(secrets),
+    )
+    registry = ToolRegistry()
+    registry.register(
+        image_tools.make_generate_image_tool(
+            secrets=SecretStore(tmp_path / "secrets.json"),
+            roots=lambda: live_roots,
+        )
+    )
+
+    live_roots.remove(revoked)
+    with pytest.raises(ValueError, match="outside"):
+        registry.execute(
+            "generate_image",
+            {"prompt": "图", "output_path": str(revoked / "cover.png")},
+        )
+    assert built == []

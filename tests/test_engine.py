@@ -7,6 +7,7 @@ import threading
 import time
 
 import aisuite as ai
+import pytest
 from coworker.engine import ApprovalOutcome, PermissionRequest, TurnEngine
 from coworker.events import EventType
 from coworker.permissions import PermissionEngine
@@ -465,3 +466,34 @@ def test_generate_image_tool_is_scoped_to_workspace_knowledge_agents(tmp_path):
     finally:
         cowork.executor.close()
         code.executor.close()
+
+
+def test_generate_image_tool_observes_engine_root_revocation(tmp_path):
+    from coworker.agent import build_engine
+    from coworker.agents import cowork_agent
+    from coworker.roots import RootDir
+    from coworker.secrets import SecretStore
+
+    primary = tmp_path / "primary"
+    extra = tmp_path / "extra"
+    primary.mkdir()
+    extra.mkdir()
+    engine = build_engine(
+        agent=cowork_agent(),
+        workspace=primary,
+        roots=[
+            RootDir(path=primary, writable=True),
+            RootDir(path=extra, writable=True),
+        ],
+        provider=ScriptedProvider([]),
+        secrets=SecretStore(tmp_path / "secrets.json"),
+    )
+    try:
+        engine.roots[:] = [root for root in engine.roots if root.path != extra.resolve()]
+        with pytest.raises(ValueError, match="outside"):
+            engine.registry.execute(
+                "generate_image",
+                {"prompt": "图", "output_path": str(extra / "cover.png")},
+            )
+    finally:
+        engine.executor.close()

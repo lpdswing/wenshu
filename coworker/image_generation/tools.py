@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import math
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -71,11 +71,25 @@ def _validate_aspect_ratio(value: str) -> str:
     return value
 
 
-def make_generate_image_tool(*, secrets: Any, roots: Iterable[str | Path]):
+def make_generate_image_tool(
+    *,
+    secrets: Any,
+    roots: Iterable[str | Path] | Callable[[], Iterable[str | Path]],
+):
     """Build a lazy, approval-gated image tool whose closure retains provider credentials."""
-    allowed_roots = tuple(Path(root).expanduser().resolve() for root in roots)
-    if not allowed_roots:
-        raise ValueError("generate_image requires at least one writable root")
+    if callable(roots):
+        root_source = roots
+    else:
+        frozen_roots = tuple(roots)
+        root_source = lambda: frozen_roots
+
+    def current_roots() -> tuple[Path, ...]:
+        allowed = tuple(
+            Path(root).expanduser().resolve() for root in root_source()
+        )
+        if not allowed:
+            raise ValueError("generate_image requires at least one writable root")
+        return allowed
 
     def generate_image(
         prompt: str,
@@ -84,6 +98,7 @@ def make_generate_image_tool(*, secrets: Any, roots: Iterable[str | Path]):
         quality: str = "high",
     ) -> dict[str, str]:
         """Generate one approved image inside the current workspace."""
+        allowed_roots = current_roots()
         raw_output = Path(output_path).expanduser()
         candidate = raw_output if raw_output.is_absolute() else allowed_roots[0] / raw_output
         resolved_output = resolve_in_roots(candidate, allowed_roots, must_exist=False)
