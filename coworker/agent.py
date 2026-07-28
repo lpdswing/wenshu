@@ -175,7 +175,13 @@ def build_engine(
     # Messaging personas (Cowork / Ops / MyHelper) expose send_message; MyHelper also uses it as
     # the reply path for inbound Telegram/Slack super-agent sessions.
     secrets = secrets or SecretStore()
-    if agent.messaging and any(s.enabled for s in load_settings(secrets).values()):
+    product = product or current_product()
+    messaging_enabled = any(
+        setting.enabled
+        for name, setting in load_settings(secrets).items()
+        if name in product.visible_connectors
+    )
+    if agent.messaging and messaging_enabled:
         registry.register(make_send_message_tool(secrets))
         # send_file (§34): hand deliverables into the chat — same targets, but its OWN
         # approval surface (a thread's standing send_message grant never covers uploads).
@@ -197,9 +203,7 @@ def build_engine(
     if agent.family == "knowledge" and root_list:
         registry.register(request_directory_tool())
     if agent.connectors:
-        enabled_connectors, enabled_tools = _enabled_connector_tools(
-            secrets, product or current_product()
-        )
+        enabled_connectors, enabled_tools = _enabled_connector_tools(secrets, product)
         # Per-session connection hierarchy (UI-REFRESH §4.3): when the caller supplies the session's
         # effective connector set, intersect it so only effective-enabled connectors expose tools.
         # Default None preserves CLI / direct callers (no per-session restriction).

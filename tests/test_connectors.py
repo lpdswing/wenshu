@@ -239,6 +239,39 @@ def test_hidden_connected_connector_tools_are_not_registered(tmp_path):
     assert not any(name.startswith("notion_") for name in engine.registry.names())
 
 
+@pytest.mark.parametrize("connector", ["slack", "telegram"])
+def test_messaging_tools_follow_product_profile(tmp_path, connector):
+    from coworker.agent import build_engine
+    from coworker.agents import cowork_agent
+
+    secrets = SecretStore(tmp_path / "secrets.json")
+    secrets.put(f"{connector}:default", {"bot_token": "secret", "enabled": True})
+
+    hidden = build_engine(
+        agent=cowork_agent(),
+        workspace=tmp_path,
+        provider=_StubProvider(),
+        secrets=secrets,
+        product=current_product(),
+    )
+    assert "send_message" not in hidden.registry.names()
+    assert "send_file" not in hidden.registry.names()
+
+    visible_product = replace(
+        current_product(),
+        visible_connectors=current_product().visible_connectors | {connector},
+    )
+    visible = build_engine(
+        agent=cowork_agent(),
+        workspace=tmp_path,
+        provider=_StubProvider(),
+        secrets=secrets,
+        product=visible_product,
+    )
+    assert "send_message" in visible.registry.names()
+    assert "send_file" in visible.registry.names()
+
+
 def test_engine_connector_tools_are_cowork_scoped(tmp_path):
     from coworker.agent import build_engine
     from coworker.agents import chat_agent, code_agent, cowork_agent, myhelper_agent
@@ -249,6 +282,10 @@ def test_engine_connector_tools_are_cowork_scoped(tmp_path):
     assert "browser_read_url" not in eng.registry.names()
 
     secrets.put("telegram:default", {"bot_token": "T"})
+    messaging_product = replace(
+        current_product(),
+        visible_connectors=current_product().visible_connectors | {"telegram"},
+    )
     chat = build_engine(agent=chat_agent(), provider=_StubProvider(), secrets=secrets)
     code = build_engine(
         agent=code_agent(),
@@ -261,12 +298,14 @@ def test_engine_connector_tools_are_cowork_scoped(tmp_path):
         workspace=tmp_path,
         provider=_StubProvider(),
         secrets=secrets,
+        product=messaging_product,
     )
     helper = build_engine(
         agent=myhelper_agent(),
         workspace=tmp_path,
         provider=_StubProvider(),
         secrets=secrets,
+        product=messaging_product,
     )
 
     assert "send_message" not in chat.registry.names()
