@@ -9,7 +9,6 @@ import yaml
 from .models import ArticleDocument, ArticleFrontmatter
 
 
-_FRONTMATTER_KEYS = frozenset({"title", "author", "summary", "coverImage", "sourceUrl"})
 
 
 class ArticleValidationError(ValueError):
@@ -34,7 +33,7 @@ def _split_frontmatter(text: str) -> tuple[str, str]:
         raise ArticleValidationError("article frontmatter is missing its closing delimiter")
 
     raw_frontmatter = "".join(lines[1:closing_index])
-    body = "".join(lines[closing_index + 1 :]).lstrip("\n")
+    body = "".join(lines[closing_index + 1 :])
     return raw_frontmatter, body
 
 
@@ -42,11 +41,14 @@ def _reject_additional_yaml_document(body: str) -> None:
     """Reject an adjacent second frontmatter-shaped YAML document.
 
     The first ``---`` after the opening marker is necessarily ambiguous: it is both the
-    frontmatter terminator and YAML's next-document marker.  Treat a following mapping made
-    from article metadata keys and terminated by another marker as a multi-document attempt,
-    while leaving ordinary Markdown thematic breaks alone.
+    frontmatter terminator and YAML's next-document marker.  A mapping immediately after it
+    and terminated by another marker is a second YAML document.  A blank line after the
+    terminator establishes Markdown body context, so mapping-shaped prose followed by an
+    ordinary thematic break remains valid.
     """
 
+    if body.startswith("\n"):
+        return
     lines = body.splitlines(keepends=True)
     delimiter_index = next(
         (index for index, line in enumerate(lines) if line.rstrip("\n") == "---"), None
@@ -61,7 +63,7 @@ def _reject_additional_yaml_document(body: str) -> None:
         parsed = yaml.safe_load(candidate)
     except yaml.YAMLError:
         return
-    if isinstance(parsed, Mapping) and _FRONTMATTER_KEYS.intersection(parsed):
+    if isinstance(parsed, Mapping):
         raise ArticleValidationError("frontmatter contains multiple YAML documents")
 
 
@@ -91,7 +93,7 @@ def _required_title(meta: Mapping[str, Any]) -> str:
 
 
 def _optional_string(meta: Mapping[str, Any], key: str, default: str | None) -> str | None:
-    if key not in meta:
+    if key not in meta or meta[key] is None:
         return default
     value = meta[key]
     if not isinstance(value, str):
@@ -105,9 +107,10 @@ def _optional_string(meta: Mapping[str, Any], key: str, default: str | None) -> 
 def load_article(path: str | Path) -> ArticleDocument:
     article_path = Path(path)
     text = article_path.read_text(encoding="utf-8")
-    raw_frontmatter, body = _split_frontmatter(text)
-    _reject_additional_yaml_document(body)
+    raw_frontmatter, raw_body = _split_frontmatter(text)
+    _reject_additional_yaml_document(raw_body)
     meta = _load_mapping(raw_frontmatter)
+    body = raw_body.lstrip("\n")
 
     frontmatter = ArticleFrontmatter(
         title=_required_title(meta),

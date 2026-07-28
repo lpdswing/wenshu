@@ -62,6 +62,28 @@ def test_optional_frontmatter_fields_have_empty_defaults(tmp_path: Path) -> None
     assert article.meta.source_url is None
 
 
+def test_optional_frontmatter_fields_accept_explicit_yaml_null(tmp_path: Path) -> None:
+    path = write_article(
+        tmp_path / "article.md",
+        (
+            "---\n"
+            "title: 标题\n"
+            "author:\n"
+            "summary: null\n"
+            "coverImage: ~\n"
+            "sourceUrl:\n"
+            "---\n\n正文\n"
+        ),
+    )
+
+    article = load_article(path)
+
+    assert article.meta.author == ""
+    assert article.meta.summary == ""
+    assert article.meta.cover_image is None
+    assert article.meta.source_url is None
+
+
 @pytest.mark.parametrize(
     ("frontmatter", "field"),
     [
@@ -114,6 +136,30 @@ def test_rejects_multiple_yaml_documents_without_body_leak(tmp_path: Path) -> No
         load_article(path)
 
     assert "UNIQUE_MULTIDOC_SECRET" not in str(exc_info.value)
+
+
+def test_rejects_adjacent_yaml_document_with_unrelated_keys(tmp_path: Path) -> None:
+    secret_body = "正文机密 UNIQUE_UNRELATED_MULTIDOC_SECRET"
+    path = write_article(
+        tmp_path / "article.md",
+        "---\ntitle: 第一篇\n---\ntags: [第二篇]\n---\n\n" + secret_body + "\n",
+    )
+
+    with pytest.raises(ArticleValidationError, match="multiple YAML documents") as exc_info:
+        load_article(path)
+
+    assert "UNIQUE_UNRELATED_MULTIDOC_SECRET" not in str(exc_info.value)
+
+
+def test_preserves_mapping_shaped_markdown_before_thematic_break(tmp_path: Path) -> None:
+    path = write_article(
+        tmp_path / "article.md",
+        "---\ntitle: 标题\n---\n\nmetadata: 正文内容\n---\n后续正文\n",
+    )
+
+    article = load_article(path)
+
+    assert article.body == "metadata: 正文内容\n---\n后续正文\n"
 
 
 def test_rejects_invalid_yaml_without_body_leak(tmp_path: Path) -> None:
