@@ -7,6 +7,7 @@ gated (`requires_approval=True` → asks outside Auto mode).
 
 from __future__ import annotations
 
+from collections.abc import Collection
 import re
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -135,8 +136,12 @@ def make_send_message_tool(
     secrets: SecretStore,
     *,
     senders: Optional[dict[str, Sender]] = None,
+    allowed_platforms: Optional[Collection[str]] = None,
 ) -> Callable[..., Any]:
-    """Build the `send_message` tool bound to a SecretStore (and optional sender registry)."""
+    """Build `send_message`, optionally scoped to allowed target platforms.
+
+    Hidden targets are rejected before credential resolution or dispatch.
+    """
     senders = senders if senders is not None else DEFAULT_SENDERS
 
     def send_message(target: str, text: str) -> dict[str, Any]:
@@ -144,6 +149,8 @@ def make_send_message_tool(
             platform, chat_id, thread_id = _parse_or_coerce(target)
         except ValueError as exc:
             return {"error": str(exc)}
+        if allowed_platforms is not None and platform not in allowed_platforms:
+            return {"error": f"connector not available in this product: {platform}"}
         sender = senders.get(platform)
         if sender is None:
             return {"error": f"unknown platform: {platform}"}
@@ -269,10 +276,14 @@ def make_send_file_tool(
     roots: Optional[list] = None,
     file_senders: Optional[dict[str, FileSender]] = None,
     render_html: Optional[Callable[[Path], bytes]] = None,
+    allowed_platforms: Optional[Collection[str]] = None,
 ) -> Callable[..., Any]:
-    """Build the `send_file` tool. Same target grammar and token resolution as
-    send_message, but a DIFFERENT tool name — standing send_message grants (e.g. a
-    mention-thread's pre-approval) never cover file uploads."""
+    """Build `send_file`, optionally scoped to allowed target platforms.
+
+    It uses the same target grammar as send_message, but a DIFFERENT tool name —
+    standing send_message grants (e.g. a mention-thread's pre-approval) never cover
+    file uploads.
+    """
     file_senders = file_senders if file_senders is not None else DEFAULT_FILE_SENDERS
     render_html = render_html or _render_html_png
     bases = [Path(r.path) for r in (roots or []) if getattr(r, "path", None)]
@@ -290,6 +301,8 @@ def make_send_file_tool(
             platform, chat_id, thread_id = _parse_or_coerce(target)
         except ValueError as exc:
             return {"error": str(exc)}
+        if allowed_platforms is not None and platform not in allowed_platforms:
+            return {"error": f"connector not available in this product: {platform}"}
         sender = file_senders.get(platform)
         if sender is None:
             return {"error": f"file sending is not supported on {platform} yet"}

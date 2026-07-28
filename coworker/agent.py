@@ -182,11 +182,20 @@ def build_engine(
         if name in product.visible_connectors
     )
     if agent.messaging and messaging_enabled:
-        registry.register(make_send_message_tool(secrets))
+        registry.register(
+            make_send_message_tool(
+                secrets, allowed_platforms=product.visible_connectors
+            )
+        )
         # send_file (§34): hand deliverables into the chat — same targets, but its OWN
         # approval surface (a thread's standing send_message grant never covers uploads).
         registry.register(
-            make_send_file_tool(secrets, workspace=ws, roots=root_list or None)
+            make_send_file_tool(
+                secrets,
+                workspace=ws,
+                roots=root_list or None,
+                allowed_platforms=product.visible_connectors,
+            )
         )
         # Channel subscriptions (inbound): listen to a channel, catch up, (un)subscribe. The agent
         # obtains a channel via ask_user or from a channel message it's reacting to.

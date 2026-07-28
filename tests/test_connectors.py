@@ -272,6 +272,57 @@ def test_messaging_tools_follow_product_profile(tmp_path, connector):
     assert "send_file" in visible.registry.names()
 
 
+@pytest.mark.parametrize(
+    ("visible_connector", "hidden_connector"),
+    [("slack", "telegram"), ("telegram", "slack")],
+)
+def test_messaging_tool_targets_are_product_scoped(
+    tmp_path, monkeypatch, visible_connector, hidden_connector
+):
+    from coworker.agent import build_engine
+    from coworker.agents import cowork_agent
+    from coworker.connectors import tools as connector_tools
+
+    monkeypatch.setitem(
+        connector_tools.DEFAULT_SENDERS,
+        hidden_connector,
+        lambda *_args, **_kwargs: SendResult(True, message_id="sent"),
+    )
+    monkeypatch.setitem(
+        connector_tools.DEFAULT_FILE_SENDERS,
+        hidden_connector,
+        lambda *_args, **_kwargs: SendResult(True, message_id="file"),
+    )
+
+    secrets = SecretStore(tmp_path / "secrets.json")
+    for connector in (visible_connector, hidden_connector):
+        secrets.put(
+            f"{connector}:default", {"bot_token": "secret", "enabled": True}
+        )
+    product = replace(
+        current_product(),
+        visible_connectors=current_product().visible_connectors | {visible_connector},
+    )
+    (tmp_path / "report.txt").write_text("report")
+    engine = build_engine(
+        agent=cowork_agent(),
+        workspace=tmp_path,
+        provider=_StubProvider(),
+        secrets=secrets,
+        product=product,
+    )
+
+    expected = {"error": f"connector not available in this product: {hidden_connector}"}
+    assert engine.registry.execute(
+        "send_message",
+        {"target": f"{hidden_connector}:destination", "text": "hello"},
+    ) == expected
+    assert engine.registry.execute(
+        "send_file",
+        {"target": f"{hidden_connector}:destination", "path": "report.txt"},
+    ) == expected
+
+
 def test_engine_connector_tools_are_cowork_scoped(tmp_path):
     from coworker.agent import build_engine
     from coworker.agents import chat_agent, code_agent, cowork_agent, myhelper_agent
