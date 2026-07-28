@@ -899,6 +899,8 @@ class SessionManager:
             descriptor = get_descriptor(server.name)
             backed = descriptor is not None and bool(descriptor.mcp_url)
             if backed:
+                if server.name not in self.product.visible_connectors:
+                    continue
                 # Connector-backed server: obey the same gates as connector tools —
                 # the session's effective connector set and the per-tool toggles.
                 # The descriptor's PIN is authoritative over whatever the config

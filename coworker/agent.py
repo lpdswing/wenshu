@@ -21,6 +21,7 @@ from .connectors import (
     make_send_file_tool,
     make_send_message_tool,
 )
+from .connectors.descriptors import get_descriptor
 from .engine import Approver, TurnEngine
 from .environment import environment_context
 from .memory import MemoryStore, Scope, format_memories, memory_tools
@@ -107,6 +108,23 @@ def _enabled_connector_tools(
     return enabled_connectors, enabled_tools
 
 
+def _extra_tool_visible(tool: Any, product: ProductProfile) -> bool:
+    """Keep ordinary and standalone MCP extras; gate descriptor-backed MCP connectors."""
+    name = getattr(tool, "__name__", "")
+    if not name.startswith("mcp__"):
+        return True
+    parts = name.split("__", 2)
+    if len(parts) != 3:
+        return True
+    connector = parts[1]
+    descriptor = get_descriptor(connector)
+    return (
+        descriptor is None
+        or not descriptor.mcp_url
+        or connector in product.visible_connectors
+    )
+
+
 def _skill_dirs(workspace: Optional[Path]) -> list[Path]:
     dirs = [state_dir() / "skills"]
     if workspace is not None:
@@ -167,15 +185,17 @@ def build_engine(
         workspace=ws, executor=executor, todo=todo, roots=root_list or None
     )
 
+    product = product or current_product()
     registry = ToolRegistry()
     registry.register_all(agent.build_tools(context))
     # MCP / connector tools (supplied by the manager) carry their own metadata + schema.
     if extra_tools:
-        registry.register_all(extra_tools)
+        for tool in extra_tools:
+            if _extra_tool_visible(tool, product):
+                registry.register(tool)
     # Messaging personas (Cowork / Ops / MyHelper) expose send_message; MyHelper also uses it as
     # the reply path for inbound Telegram/Slack super-agent sessions.
     secrets = secrets or SecretStore()
-    product = product or current_product()
     messaging_enabled = any(
         setting.enabled
         for name, setting in load_settings(secrets).items()
