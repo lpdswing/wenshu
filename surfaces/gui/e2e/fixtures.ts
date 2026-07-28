@@ -1,9 +1,38 @@
-import { test as base, expect, type Page } from "@playwright/test";
+import { test as base, expect, type Locator, type Page } from "@playwright/test";
 import type { ProductInfo } from "../src/api";
 
 // The app-wide /ws/events socket each page opened (UX-026 toast et al.) — specs
 // push server events through it via sendAppEvent below.
 const eventSockets = new WeakMap<Page, { send: (data: string) => void }>();
+
+export const CORE_CHROME = {
+  accountMenu: {
+    inbox: "收件箱",
+    connectors: "连接器",
+    settings: "设置",
+    automations: "自动化",
+    activity: "活动记录",
+  },
+} as const;
+
+export type AccountMenuDestination = keyof typeof CORE_CHROME.accountMenu;
+
+export function accountMenuItem(page: Page, destination: AccountMenuDestination): Locator {
+  return page
+    .getByTestId("account-menu")
+    .getByRole("button", { name: CORE_CHROME.accountMenu[destination], exact: true });
+}
+
+export async function openAccountPage(
+  page: Page,
+  destination: AccountMenuDestination,
+  { navigate = true }: { navigate?: boolean } = {},
+): Promise<void> {
+  if (navigate) await page.goto("/");
+  await page.getByTestId("account-row").click();
+  await expect(page.getByTestId("account-menu")).toBeVisible();
+  await accountMenuItem(page, destination).click();
+}
 
 /** Push an app-wide event exactly as the server would over /ws/events. Waits for
  * the GUI to have connected its socket first. */

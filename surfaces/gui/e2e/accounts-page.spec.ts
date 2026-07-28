@@ -2,12 +2,11 @@
 // one-click pane, exercised via Notion — the pattern all batch-2 connectors
 // share (accounts.py layer: AccountRow shape, Default badge, per-account ×).
 import { expect } from "@playwright/test";
-import { test } from "./fixtures";
+import { openAccountPage, test } from "./fixtures";
 
 async function openConnectors(page) {
-  await page.goto("/");
-  await page.getByTestId("account-row").click();
-  await page.getByRole("button", { name: "Connectors", exact: true }).click();
+  await openAccountPage(page, "connectors");
+  
 }
 
 async function signInAndConnectFirstWorkspace(page) {

@@ -3,12 +3,10 @@
 // (breadcrumb back), available connectors get a Connect pill → add-connection modal
 // with One click | Manual pills for multi-mode connectors.
 import { expect } from "@playwright/test";
-import { test } from "./fixtures";
+import { openAccountPage, test } from "./fixtures";
 
 async function openConnectors(page) {
-  await page.goto("/");
-  await page.getByTestId("account-row").click();
-  await page.getByRole("button", { name: "Connectors", exact: true }).click();
+  await openAccountPage(page, "connectors");
 }
 
 test("connected connectors come first with status + health chip", async ({ page }) => {

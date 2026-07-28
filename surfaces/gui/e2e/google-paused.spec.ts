@@ -4,7 +4,7 @@
 // gmail unpaused (the cloud-machinery specs use it as their one-click subject), so this
 // spec overrides the connectors payload per test, like automations-quickstart does.
 import { expect } from "@playwright/test";
-import { test } from "./fixtures";
+import { openAccountPage, test } from "./fixtures";
 
 const GMAIL_BASE = {
   name: "gmail",
@@ -38,9 +38,8 @@ async function serveGmail(page, extra: Record<string, unknown>) {
 }
 
 async function openConnectors(page) {
-  await page.goto("/");
-  await page.getByTestId("account-row").click();
-  await page.getByRole("button", { name: "Connectors", exact: true }).click();
+  await openAccountPage(page, "connectors");
+  
 }
 
 test("paused one-click: Coming soon badge in the connect modal, manual path alive", async ({

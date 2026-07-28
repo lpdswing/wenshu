@@ -2,12 +2,11 @@
 // Default badge, per-account disconnect, direct one-click add (no modal — Gmail
 // has one connect mode), and the "Never show agents" filter lists.
 import { expect } from "@playwright/test";
-import { test } from "./fixtures";
+import { openAccountPage, test } from "./fixtures";
 
 async function openConnectors(page) {
-  await page.goto("/");
-  await page.getByTestId("account-row").click();
-  await page.getByRole("button", { name: "Connectors", exact: true }).click();
+  await openAccountPage(page, "connectors");
+  
 }
 
 async function signInAndConnectFirstAccount(page) {

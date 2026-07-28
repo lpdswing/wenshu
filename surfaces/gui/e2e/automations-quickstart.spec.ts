@@ -3,12 +3,10 @@
 // "Start from a template" grid. Cards carry §27's connector-dot vocabulary; picking one expands
 // the configure card. The `ob-*` testids moved here with the machinery.
 import { expect } from "@playwright/test";
-import { test } from "./fixtures";
+import { openAccountPage, test } from "./fixtures";
 
 async function openAutomations(page) {
-  await page.goto("/");
-  await page.getByTestId("account-row").click();
-  await page.getByTestId("account-menu").getByRole("button", { name: "Automations", exact: true }).click();
+  await openAccountPage(page, "automations");
   await expect(page.getByText("Recurring tasks 文枢 runs on a schedule.")).toBeVisible();
 }
 

@@ -4,12 +4,11 @@
 // The fixture's /v1/connectors/slack/status reads live+signed-out by default; each
 // state here is forced with a later page.route override (later routes match first).
 import { expect } from "@playwright/test";
-import { test } from "./fixtures";
+import { openAccountPage, test } from "./fixtures";
 
 async function openConnectors(page) {
-  await page.goto("/");
-  await page.getByTestId("account-row").click();
-  await page.getByRole("button", { name: "Connectors", exact: true }).click();
+  await openAccountPage(page, "connectors");
+  
 }
 
 function statusPayload(overrides: any = {}) {

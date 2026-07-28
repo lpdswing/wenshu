@@ -3,12 +3,10 @@
 // via the header MODAL (One click | Manual), and the park → allow & deliver flow
 // that admits a new sender login into that installation's allow-list.
 import { expect } from "@playwright/test";
-import { test } from "./fixtures";
+import { openAccountPage, test } from "./fixtures";
 
 async function openGithubPage(page) {
-  await page.goto("/");
-  await page.getByTestId("account-row").click();
-  await page.getByRole("button", { name: "Connectors", exact: true }).click();
+  await openAccountPage(page, "connectors");
   await page.getByTestId("connector-github").click();
 }
 

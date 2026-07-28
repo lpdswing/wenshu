@@ -3,12 +3,11 @@
 // always visible, never below any fold — and every signed-out one-click pane carries a
 // real Sign-in button, not a hint pointing at another page.
 import { expect } from "@playwright/test";
-import { test } from "./fixtures";
+import { openAccountPage, test } from "./fixtures";
 
 async function openConnectors(page) {
-  await page.goto("/");
-  await page.getByTestId("account-row").click();
-  await page.getByTestId("account-menu").getByRole("button", { name: "Connectors", exact: true }).click();
+  await openAccountPage(page, "connectors");
+  
 }
 
 test("the account row is always visible and signs in from its menu", async ({ page }) => {

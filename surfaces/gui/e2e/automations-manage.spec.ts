@@ -2,12 +2,10 @@
 // Back) doesn't cover: the task list, triggering a manual run (POST .../run appends a run and opens
 // its live session), pausing via the enable toggle, and deleting. Seeded with one task.
 import { expect } from "@playwright/test";
-import { test } from "./fixtures";
+import { openAccountPage, test } from "./fixtures";
 
 async function openAutomations(page) {
-  await page.goto("/");
-  await page.getByTestId("account-row").click();
-  await page.getByTestId("account-menu").getByRole("button", { name: "Automations", exact: true }).click();
+  await openAccountPage(page, "automations");
   await expect(page.getByText("Recurring tasks 文枢 runs on a schedule.")).toBeVisible();
 }
 

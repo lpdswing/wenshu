@@ -2,12 +2,10 @@
 // card; connecting adds the server, kicks off the browser sign-in ("signing in…"),
 // and the tab's poll flips the row to connected. Sign out returns it to needs_auth.
 import { expect } from "@playwright/test";
-import { test } from "./fixtures";
+import { openAccountPage, test } from "./fixtures";
 
 async function openMcpTab(page) {
-  await page.goto("/");
-  await page.getByTestId("account-row").click();
-  await page.getByRole("button", { name: "Connectors", exact: true }).click();
+  await openAccountPage(page, "connectors");
   await page.getByRole("button", { name: "MCP servers", exact: true }).click();
 }
 
