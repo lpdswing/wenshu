@@ -32,7 +32,7 @@ import {
 import type { ApprovalDecision, Attachment, Item, SessionInfo, TodoItem, WsEvent } from "./types";
 import { isProjectScoped } from "./personaScope";
 import { baseName } from "./paths";
-import { itemsFromMessages, modelChangedNotice } from "./itemsFromMessages";
+import { itemsFromMessages, modelChangedNotice, modelChangeHasImageWarning } from "./itemsFromMessages";
 import { streamMode } from "./streamGate";
 import { InboxItemCard } from "./components/InboxItemCard";
 import { isTauri, platformOS, startWindowDrag } from "./tauri";
@@ -698,7 +698,11 @@ export function App() {
             {
               kind: "notice",
               tone: "info",
-              text: modelChangedNotice(d.model, modelLabelsRef.current),
+              text: modelChangedNotice(
+                d.model,
+                modelLabelsRef.current,
+                modelChangeHasImageWarning(d.text),
+              ),
             },
           ]);
           break;

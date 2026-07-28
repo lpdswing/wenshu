@@ -11,16 +11,27 @@ import type { Attachment, Item } from "./types";
 const MODEL_SWITCH_PREFIX = "Model switched to ";
 const MODEL_SWITCH_IMAGE_WARNING = " — earlier images can't be read by this model";
 
-const modelNotice = (label: string) => (label ? `已切换模型：${label}` : "已切换模型");
+const modelNotice = (label: string, imageWarning = false) =>
+  (label ? `已切换模型：${label}` : "已切换模型") +
+  (imageWarning ? " — 此模型无法读取之前的图片" : "");
+
+export function modelChangeHasImageWarning(text: unknown): boolean {
+  return (
+    typeof text === "string" &&
+    text.startsWith(MODEL_SWITCH_PREFIX) &&
+    text.endsWith(MODEL_SWITCH_IMAGE_WARNING)
+  );
+}
 
 export function modelChangedNotice(
   model: unknown,
   labels: Readonly<Record<string, string>> = {},
+  imageWarning = false,
 ): string {
   if (typeof model !== "string" || !model) return modelNotice("");
   const label =
     labels[model] || (model.includes(":") ? model.split(":").slice(1).join(":") : model);
-  return modelNotice(label);
+  return modelNotice(label, imageWarning);
 }
 
 function replayedModelChangeNotice(text: unknown): string {
@@ -29,11 +40,11 @@ function replayedModelChangeNotice(text: unknown): string {
   if (!text.startsWith(MODEL_SWITCH_PREFIX)) return modelNotice("");
 
   const persisted = text.slice(MODEL_SWITCH_PREFIX.length);
-  const warned = persisted.endsWith(MODEL_SWITCH_IMAGE_WARNING);
+  const warned = modelChangeHasImageWarning(text);
   const label = warned
     ? persisted.slice(0, -MODEL_SWITCH_IMAGE_WARNING.length)
     : persisted;
-  return modelNotice(label) + (warned ? " — 此模型无法读取之前的图片" : "");
+  return modelNotice(label, warned);
 }
 
 export function itemsFromMessages(messages: ConversationMessage[]): Item[] {

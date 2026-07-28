@@ -619,10 +619,18 @@ export async function mockApi(
     let pendingTool = "run_shell"; // which proposal the next approval decision resolves
     let epicTimer: ReturnType<typeof setInterval> | null = null; // the slow stream, stoppable via interrupt
     let hadTurn = false; // a user_message landed — set_model is now a mid-session switch
+    let hadImage = false;
     ws.onMessage((raw) => {
       const msg = JSON.parse(String(raw));
       if (msg.type === "user_message") {
         hadTurn = true;
+        hadImage ||= Array.isArray(msg.attachments) && msg.attachments.some(
+          (attachment: unknown) =>
+            !!attachment &&
+            typeof attachment === "object" &&
+            "kind" in attachment &&
+            attachment.kind === "image",
+        );
         send("turn_start", { input: msg.text });
         if (/(?:run a tool|运行一个工具)/i.test(msg.text)) {
           pendingTool = "run_shell";
@@ -782,7 +790,9 @@ export async function mockApi(
         if (hadTurn)
           send("model_changed", {
             model: msg.model,
-            text: `Model switched to ${msg.model}`,
+            text:
+              `Model switched to ${msg.model}` +
+              (hadImage ? " — earlier images can't be read by this model" : ""),
           });
       } else if (msg.type === "retry") {
         // Like the real engine: re-runs with NO new user message (turn_start input is empty).
