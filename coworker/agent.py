@@ -31,6 +31,7 @@ from .roots import RootDir, normalize_roots, render_context
 from .providers import ProviderClient, ProviderRouter
 from .overrides import RiskOverrideStore
 from .product import ProductProfile, current_product
+from .image_generation import make_generate_image_tool
 from .secrets import SecretStore, state_dir
 from .skills import SkillLoader, skill_catalog_text, skill_tools
 from .tools import ToolRegistry
@@ -196,6 +197,11 @@ def build_engine(
     # Messaging personas (Cowork / Ops / MyHelper) expose send_message; MyHelper also uses it as
     # the reply path for inbound Telegram/Slack super-agent sessions.
     secrets = secrets or SecretStore()
+    writable_roots = [root.path for root in root_list if root.writable]
+    if agent.family == "knowledge" and writable_roots:
+        registry.register(
+            make_generate_image_tool(secrets=secrets, roots=writable_roots)
+        )
     messaging_enabled = any(
         setting.enabled
         for name, setting in load_settings(secrets).items()

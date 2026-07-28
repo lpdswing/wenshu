@@ -439,3 +439,29 @@ def test_outbound_replaces_images_for_non_vision_models(tmp_path):
     assert all(p["type"] != "image_url" for p in parts)
     assert "not viewable" in parts[-1]["text"]
     assert engine.messages[-1]["content"][1]["type"] == "image_url"  # history untouched
+
+
+def test_generate_image_tool_is_scoped_to_workspace_knowledge_agents(tmp_path):
+    from coworker.agent import build_engine
+    from coworker.agents import code_agent, cowork_agent
+    from coworker.secrets import SecretStore
+
+    secrets = SecretStore(tmp_path / "secrets.json")
+    cowork = build_engine(
+        agent=cowork_agent(),
+        workspace=tmp_path,
+        provider=ScriptedProvider([]),
+        secrets=secrets,
+    )
+    code = build_engine(
+        agent=code_agent(),
+        workspace=tmp_path,
+        provider=ScriptedProvider([]),
+        secrets=secrets,
+    )
+    try:
+        assert "generate_image" in cowork.registry.names()
+        assert "generate_image" not in code.registry.names()
+    finally:
+        cowork.executor.close()
+        code.executor.close()
