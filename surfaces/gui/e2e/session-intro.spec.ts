@@ -21,7 +21,7 @@ test("content recommendations prefill natural-language requests without claiming
   page,
 }) => {
   await page.goto("/");
-  const composer = page.getByPlaceholder(/Ask the coworker/);
+  const composer = page.getByPlaceholder("告诉文枢你想完成什么...");
 
   for (const suggestion of CONTENT_SUGGESTIONS) {
     await page.getByText(suggestion, { exact: true }).click();
@@ -35,13 +35,13 @@ test("secondary setup preserves the add-folder prerequisite flow", async ({ page
   await page.goto("/");
 
   await page.getByTestId("intro-task-folder").click();
-  const path = page.getByPlaceholder("Choose or paste a folder path…");
+  const path = page.getByPlaceholder("选择或粘贴文件夹路径…");
   await expect(path).toBeVisible();
   await path.fill("/Users/me/Reports");
-  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await page.getByRole("button", { name: "添加", exact: true }).click();
 
-  await expect(page.getByPlaceholder(/Ask the coworker/)).toHaveValue(
-    /Analyze the files in this folder/,
+  await expect(page.getByPlaceholder("告诉文枢你想完成什么...")).toHaveValue(
+    "分析这个文件夹中的文件并总结重点。",
   );
 });
 
@@ -49,9 +49,9 @@ test("secondary disconnected source action still opens session access", async ({
   await page.goto("/");
 
   const hubspot = page.getByTestId("intro-task-hubspot");
-  await expect(hubspot).toContainText("Configure ›");
+  await expect(hubspot).toContainText("配置 ›");
   await hubspot.click();
 
-  await expect(page.getByRole("region", { name: "Session access" })).toBeVisible();
-  await expect(page.getByPlaceholder(/Ask the coworker/)).toHaveValue("");
+  await expect(page.getByRole("region", { name: "会话访问范围" })).toBeVisible();
+  await expect(page.getByPlaceholder("告诉文枢你想完成什么...")).toHaveValue("");
 });

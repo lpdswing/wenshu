@@ -62,9 +62,9 @@ describe("itemsFromMessages notices", () => {
     expect(items).toEqual([
       { kind: "user", text: "hi" },
       { kind: "assistant", text: "partial ans" },
-      { kind: "notice", tone: "warn", text: "Interrupted." },
+      { kind: "notice", tone: "warn", text: "已中断。" },
       { kind: "user", text: "again" },
-      { kind: "notice", tone: "warn", text: "Error: model down", retriable: true },
+      { kind: "notice", tone: "warn", text: "错误：model down", retriable: true },
     ]);
   });
 });
@@ -78,7 +78,22 @@ describe("itemsFromMessages model switch", () => {
     expect(items[1]).toEqual({
       kind: "notice",
       tone: "info",
-      text: "Model switched to Kimi K2.6 · Moonshot",
+      text: "已切换模型：Kimi K2.6 · Moonshot",
+    });
+  });
+
+  it("translates the persisted image warning without changing the model label", () => {
+    const items = itemsFromMessages([
+      {
+        role: "notice",
+        kind: "model_switch",
+        text: "Model switched to Claude Opus 4.8 · Anthropic — earlier images can't be read by this model",
+      },
+    ]);
+    expect(items[0]).toEqual({
+      kind: "notice",
+      tone: "info",
+      text: "已切换模型：Claude Opus 4.8 · Anthropic — 此模型无法读取之前的图片",
     });
   });
 });

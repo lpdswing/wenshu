@@ -9,22 +9,22 @@ import { test, expect } from "./fixtures";
 const personaMenu = (page: import("@playwright/test").Page) => page.locator(".newsplit-menu");
 
 async function startAs(page: import("@playwright/test").Page, persona: RegExp) {
-  await page.getByLabel("Choose a persona").click();
+  await page.getByLabel("选择角色").click();
   await personaMenu(page).getByRole("button", { name: persona }).click();
 }
 
 test("knowledge persona: new session starts instantly, no folder gate", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByPlaceholder(/Ask the coworker/)).toBeVisible();
+  await expect(page.getByPlaceholder("告诉文枢你想完成什么...")).toBeVisible();
 
   await startAs(page, /Ops/);
   await expect(page.locator(".gate-overlay")).toHaveCount(0);
-  await expect(page.getByPlaceholder(/Ask the coworker/)).toBeVisible();
+  await expect(page.getByPlaceholder("告诉文枢你想完成什么...")).toBeVisible();
 });
 
 test("code persona: the folder gate blocks until a project is chosen", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByPlaceholder(/Ask the coworker/)).toBeVisible();
+  await expect(page.getByPlaceholder("告诉文枢你想完成什么...")).toBeVisible();
 
   await startAs(page, /Code/);
 
@@ -39,5 +39,5 @@ test("code persona: the folder gate blocks until a project is chosen", async ({ 
 
   // Gate clears, the session is rooted in the chosen folder, and the code composer is live.
   await expect(page.locator(".gate-overlay")).toHaveCount(0);
-  await expect(page.getByPlaceholder(/Ask the coder/)).toBeVisible();
+  await expect(page.getByPlaceholder("告诉文枢你想完成什么...")).toBeVisible();
 });

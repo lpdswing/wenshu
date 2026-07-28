@@ -32,7 +32,7 @@ import {
 import type { ApprovalDecision, Attachment, Item, SessionInfo, TodoItem, WsEvent } from "./types";
 import { isProjectScoped } from "./personaScope";
 import { baseName } from "./paths";
-import { itemsFromMessages } from "./itemsFromMessages";
+import { itemsFromMessages, modelChangedNotice } from "./itemsFromMessages";
 import { streamMode } from "./streamGate";
 import { InboxItemCard } from "./components/InboxItemCard";
 import { isTauri, platformOS, startWindowDrag } from "./tauri";
@@ -155,6 +155,7 @@ export function App() {
   const [product, setProduct] = useState<ProductInfo | null>(null);
   const [models, setModels] = useState<string[]>([]);
   const [modelLabels, setModelLabels] = useState<Record<string, string>>({});
+  const modelLabelsRef = useRef<Record<string, string>>({});
   const [surfaces, setSurfaces] = useState<SurfaceVisibility>({ cowork: true, chat: false, code: false });
   const [mode, setMode] = useState("interactive");
   const [connected, setConnected] = useState(false);
@@ -484,8 +485,10 @@ export function App() {
   const loadSettings = () =>
     getSettings()
       .then((s) => {
+        const labels = s.model_labels || {};
         setModels(s.models || []);
-        setModelLabels(s.model_labels || {});
+        setModelLabels(labels);
+        modelLabelsRef.current = labels;
         setModelReady(s.model_ready);
         if (s.surfaces) setSurfaces(s.surfaces);
       })
@@ -690,7 +693,14 @@ export function App() {
           // Mid-session switch (server-applied): update the header fact and drop the
           // persisted marker into the live transcript (replay renders it from history).
           if (d.model) setModel(d.model);
-          setItems((p) => [...p, { kind: "notice", tone: "info", text: d.text || "已切换模型" }]);
+          setItems((p) => [
+            ...p,
+            {
+              kind: "notice",
+              tone: "info",
+              text: modelChangedNotice(d.model, modelLabelsRef.current),
+            },
+          ]);
           break;
         case "interrupted":
           flushPartialStream();
