@@ -2,7 +2,7 @@
 
 ## Status
 
-后端回归夹具修复完成，准备提交，未 push。没有修改生产代码，也没有改变文枢默认产品行为。
+后端全量回归通过：`1644 passed, 1 skipped`。测试夹具修复没有修改生产代码，也没有改变文枢默认产品行为。
 
 ## Root cause
 
@@ -89,6 +89,14 @@ pytest: 17 passed, 1 warning in 13.73s
 
 唯一 warning 是既有 FastAPI TestClient 对 `httpx` 的 `StarletteDeprecationWarning`，与本修改无关。
 
+## Full backend acceptance
+
+```text
+.venv/bin/pytest -q
+```
+
+最终结果：`1644 passed, 1 skipped, 1 warning`。唯一 warning 仍是既有 FastAPI TestClient 对 `httpx` 的 `StarletteDeprecationWarning`。
+
 ## Changed files
 
 - `tests/conftest.py`
@@ -106,6 +114,5 @@ pytest: 17 passed, 1 warning in 13.73s
 
 ## Remaining risk
 
-- 按任务约束未运行全量 pytest；父任务负责最终全量回归。
 - permissive fixture 的 Connector 集合会随 descriptor catalog 自动包含新增项；feature 集合则显式覆盖当前 ProductProfile 的五个 feature，未来新增 feature 时需要明确决定 legacy fixture 是否启用。
 - 未触碰生产 ProductProfile、Connector gate、Cloud/Relay/Gallery/managed OAuth 行为。

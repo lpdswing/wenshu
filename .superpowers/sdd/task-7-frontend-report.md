@@ -2,9 +2,9 @@
 
 ## Status
 
-前端回归契约修复完成，34 个原失败 spec 文件已按五个 focused cluster 运行通过，相关 Vitest 通过，未 push。
+前端全量验收通过：Vite 生产构建、68 个 Vitest、154 个 Playwright E2E 均通过；Playwright 默认六 worker 运行无失败、无 retry。
 
-本任务只修改 E2E fixture/helper 与 spec；没有修改生产组件，没有增加双语 fallback，也没有改变文枢的 Cloud、Relay、Gallery、managed OAuth 或国外 Connector gate。
+测试契约修复只修改 E2E fixture/helper 与 spec；最终另调整 Playwright webServer：普通运行先生成并服务生产构建，避免 Vite dev server 在全量并发下偶发半启动页面；`--ui` 仍保留 HMR。没有修改生产组件，没有增加双语 fallback，也没有改变文枢的 Cloud、Relay、Gallery、managed OAuth 或国外 Connector gate。
 
 ## Root cause
 
@@ -150,6 +150,24 @@ npx vitest run \
 
 结果：`4 passed` test files，`13 passed` tests。
 
+### 7. Full frontend acceptance
+
+```text
+cd surfaces/gui
+npm run build
+npm test -- --run
+npx playwright test
+```
+
+最终结果：
+
+- Vite production build：PASS。
+- Vitest：`31 passed` test files，`68 passed` tests。
+- Playwright（production preview、六 workers）：`154 passed`，无 retry。
+- 额外稳定性运行（production preview、两 workers、`--retries=0`）：`154 passed`。
+
+修改前同一全量 Playwright 集合由 Vite dev server 提供页面，分别出现 `3 failed / 151 passed` 与 `2 failed / 152 passed` 的随机页面半启动超时；手动切换 production preview 后 `154 passed`。`playwright.config.ts` 因此将普通验收固定到 fresh build + preview，同时让 `--ui` 保留 dev server。
+
 ## Intentionally retained English assertions
 
 仍保留英文的断言只位于 OPENWORKER legacy/vendor surface 或 data-driven 内容：
@@ -218,7 +236,7 @@ Report：
 
 ## Remaining risk
 
-- 按任务约束未运行全量 Playwright、build 或 lint；父任务负责最终统一全量回归。
-- 聚合 Connector focused run 在并行启动页面时出现两个首轮 timing retry；两个对应文件随后以两 worker 干净通过，未发现行为性失败。
+- Vite 仍报告既有的 `api.ts` 混合静态/动态导入与大 chunk warning；不影响构建或 E2E。
+- Playwright/Node 仍报告既有 `NO_COLOR` / `FORCE_COLOR` 环境 warning；不影响结果。
 - OPENWORKER legacy/vendor surface 仍保留原文；未来若生产代码明确翻译这些 vendor-owned 页面，应同步更新对应 selector，而不是加入双语生产 fallback。
-- 本任务未触碰生产 ProductProfile、Connector filtering 或 feature gate，文枢默认行为保持不变。
+- 未触碰生产 ProductProfile、Connector filtering 或 feature gate，文枢默认行为保持不变。
