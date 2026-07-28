@@ -1,5 +1,5 @@
 import { expect } from "@playwright/test";
-import { test } from "./fixtures";
+import { test, wenshuTest } from "./fixtures";
 
 const CONTENT_SUGGESTIONS = [
   "整理这些资料，先生成一版文章草稿。",
@@ -43,6 +43,15 @@ test("secondary setup preserves the add-folder prerequisite flow", async ({ page
   await expect(page.getByPlaceholder("告诉文枢你想完成什么...")).toHaveValue(
     "分析这个文件夹中的文件并总结重点。",
   );
+});
+
+wenshuTest("fresh WenShu session only shows product-scoped setup sources", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page.getByTestId("intro-task-folder")).toBeVisible();
+  await expect(page.locator(".intro-content-recommendations").locator(".task-card")).toHaveCount(3);
+  await expect(page.getByTestId("intro-task-hubspot")).toHaveCount(0);
+  await expect(page.getByTestId("intro-task-github-slack")).toHaveCount(0);
 });
 
 test("secondary disconnected source action still opens session access", async ({ page }) => {

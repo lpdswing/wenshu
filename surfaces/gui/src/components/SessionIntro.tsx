@@ -57,6 +57,8 @@ export function SessionIntro({
   }, [sessionId]);
 
   const shared = roots.filter((root) => !root.primary);
+  const hubspotAvailable = byName.hubspot?.available === true;
+  const ghSlackAvailable = byName.github?.available === true && byName.slack?.available === true;
   const hubspotReady = live.has("hubspot");
   const ghSlackReady = live.has("github") && live.has("slack");
 
@@ -119,6 +121,7 @@ export function SessionIntro({
           </div>
         )}
 
+        {hubspotAvailable && (
         <button
           className={"task-card" + (hubspotReady ? "" : " gated")}
           data-testid="intro-task-hubspot"
@@ -133,7 +136,9 @@ export function SessionIntro({
           </span>
           <span className="task-card-act">{hubspotReady ? "开始 →" : "配置 ›"}</span>
         </button>
+        )}
 
+        {ghSlackAvailable && (
         <button
           className={"task-card" + (ghSlackReady ? "" : " gated")}
           data-testid="intro-task-github-slack"
@@ -149,6 +154,7 @@ export function SessionIntro({
           </span>
           <span className="task-card-act">{ghSlackReady ? "开始 →" : "配置 ›"}</span>
         </button>
+        )}
       </div>
     </div>
   );
