@@ -1,5 +1,6 @@
 {
   "name": "openworker-gui",
+  "description": "文枢 WenShu desktop interface",
   "private": true,
   "version": "0.0.0",
   "type": "module",

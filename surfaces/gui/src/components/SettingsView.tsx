@@ -69,10 +69,12 @@ export function SettingsView({
   initialTab,
   onOpenPersona,
   galleryEnabled,
+  updaterEnabled,
 }: {
   initialTab?: SetTab;
   onOpenPersona?: (id: string) => void;
   galleryEnabled: boolean;
+  updaterEnabled: boolean;
 }) {
   // Personas is flag-gated (hidden for launch) — filter the tab AND coerce a stale
   // deep-link to it (openSettings("personas") callers) so the page never opens on a
@@ -108,7 +110,7 @@ export function SettingsView({
       <div className="flex-1 min-w-0 overflow-y-auto hairline-scroll">
         <div className="max-w-3xl mx-auto px-7 py-6">
           {tab === "appearance" ? (
-            <AppearanceSection />
+            <AppearanceSection updaterEnabled={updaterEnabled} />
           ) : tab === "models" ? (
             <section>
               <PanelHead
@@ -402,7 +404,7 @@ function PersonasSection({
 }
 
 // -- Appearance + app behaviour ------------------------------------------------
-function AppearanceSection() {
+function AppearanceSection({ updaterEnabled }: { updaterEnabled: boolean }) {
   const [theme, setTheme] = useThemePref();
   const [autostart, setAuto] = useState(false);
   const [keepAwake, setKeep] = useState(false);
@@ -464,16 +466,17 @@ function AppearanceSection() {
         </div>
       )}
 
-      {/* One card for the app-lifecycle actions (UX-021): the onboarding replay (§24 —
-          every build, the browser dev shell runs the same first-run flow) and, on
-          desktop, the manual update check (launch also checks automatically). */}
+      {/* Product-gated lifecycle actions: updater-disabled builds expose setup only and
+          never invoke a native updater that has no endpoint or public key configured. */}
       <div className={CARD + " p-4 mt-4"}>
-        <div className={FIELD_LABEL + " mb-2"}>Setup &amp; updates</div>
+        <div className={FIELD_LABEL + " mb-2"}>
+          {updaterEnabled ? "Setup & updates" : "Setup"}
+        </div>
         <div className="flex items-center gap-2">
           <button className={BTN_BORDERED} onClick={runSetupAgain}>
             Run setup again
           </button>
-          {desktop && <UpdateInline />}
+          {desktop && updaterEnabled && <UpdateInline />}
         </div>
         <div className={FIELD_HELP}>Replays the first-run setup: model, first automation, tips.</div>
       </div>

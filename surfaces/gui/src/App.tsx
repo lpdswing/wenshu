@@ -1312,6 +1312,7 @@ export function App() {
           key={settingsTab}
           initialTab={settingsTab}
           galleryEnabled={productFeatures.gallery === true}
+          updaterEnabled={productFeatures.updater === true}
           onOpenPersona={(id) => openPersona(id, "settings")}
         />
       ) : surface === "audit" ? (
