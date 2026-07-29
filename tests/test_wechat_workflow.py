@@ -3,7 +3,10 @@ from __future__ import annotations
 import asyncio
 import copy
 import hashlib
+import io
 import json
+from email.parser import BytesParser
+from email.policy import default
 from pathlib import Path
 
 import httpx
@@ -135,15 +138,39 @@ def _tool_result(event) -> dict[str, object]:
     return result
 
 
+def _multipart_media(request: httpx.Request) -> bytes:
+    message = BytesParser(policy=default).parsebytes(
+        (
+            f"Content-Type: {request.headers['content-type']}\r\n"
+            "MIME-Version: 1.0\r\n\r\n"
+        ).encode("ascii")
+        + request.content
+    )
+    media = next(
+        part
+        for part in message.iter_parts()
+        if part.get_param("name", header="content-disposition") == "media"
+    )
+    payload = media.get_payload(decode=True)
+    assert isinstance(payload, bytes)
+    return payload
+
+
 def test_wechat_offline_review_to_draft_workflow(tmp_path, monkeypatch) -> None:
     """One contract from REST connection through review approval and idempotent draft."""
+
+    validator_calls: list[str] = []
+
+    def validate_credentials(client: WeChatClient) -> str:
+        validator_calls.append(client.account_id)
+        return "validator-only-token"
 
     manager = SessionManager(workspace=tmp_path, provider=_WorkflowProvider({}))
     with monkeypatch.context() as connect_patch:
         connect_patch.setattr(
             WeChatClient,
             "get_access_token",
-            lambda self: "validator-only-token",
+            validate_credentials,
         )
         with TestClient(create_app(manager)) as rest:
             connected = rest.post(
@@ -169,6 +196,7 @@ def test_wechat_offline_review_to_draft_workflow(tmp_path, monkeypatch) -> None:
                 "need_open_comment": True,
                 "only_fans_can_comment": True,
             }
+    assert len(validator_calls) == 1
 
     assert manager.secrets.get("wechat_official:default") == {
         "type": "token",
@@ -366,12 +394,21 @@ def test_wechat_offline_review_to_draft_workflow(tmp_path, monkeypatch) -> None:
         "access_token": _ACCESS_TOKEN,
     }
     assert dict(draft_request.url.params) == {"access_token": _ACCESS_TOKEN}
+    assert draft_request.method == "POST"
     for upload_request in (body_request, cover_request):
         assert upload_request.method == "POST"
         assert upload_request.headers["content-type"].startswith("multipart/form-data;")
         assert b'name="media"' in upload_request.content
         assert b'filename="wechat-image.png"' in upload_request.content
         assert b"\x89PNG\r\n\x1a\n" in upload_request.content
+    with Image.open(io.BytesIO(_multipart_media(body_request))) as body_image:
+        body_image.load()
+        assert body_image.size == (12, 8)
+        assert body_image.convert("RGB").getpixel((0, 0)) == (190, 40, 70)
+    with Image.open(io.BytesIO(_multipart_media(cover_request))) as cover_image:
+        cover_image.load()
+        assert cover_image.size == (12, 8)
+        assert cover_image.convert("RGB").getpixel((0, 0)) == (20, 90, 180)
 
     draft_payload = json.loads(draft_request.content)
     assert set(draft_payload) == {"articles"}
@@ -392,6 +429,8 @@ def test_wechat_offline_review_to_draft_workflow(tmp_path, monkeypatch) -> None:
         'src="https://mmbiz.qpic.cn/workflow/body.png?a=1&amp;b=2"'
         in submitted_article["content"]
     )
+    assert "正文" in submitted_article["content"]
+    assert "这是一篇已经审阅的文章。" in submitted_article["content"]
 
     receipt = json.loads((article_path.parent / "receipt.json").read_text(encoding="utf-8"))
     assert receipt["media_id"] == _DRAFT_MEDIA_ID
