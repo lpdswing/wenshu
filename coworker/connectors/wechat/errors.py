@@ -30,6 +30,14 @@ class WeChatError(Exception):
     def __repr__(self) -> str:
         return f"{type(self).__name__}({str(self)!r})"
 
+class WeChatImageError(WeChatError):
+    """A safe, local validation or normalization failure."""
+
+
+class ReceiptStoreError(ValueError):
+    """The article-local receipt cannot be read or written safely."""
+
+
 
 class WeChatCredentialError(WeChatError):
     pass
@@ -70,6 +78,25 @@ class WeChatAPIError(WeChatError):
     @property
     def kind(self) -> WeChatErrorKind:
         return self.data.kind
+
+def wechat_failure_kind(error: BaseException) -> str:
+    """Map every connector exception to the stable, secret-safe result taxonomy."""
+    if isinstance(error, WeChatAPIError):
+        return error.kind
+    if isinstance(error, WeChatCredentialError):
+        return "invalid_credentials"
+    if isinstance(error, WeChatTransportError):
+        return "transport"
+    if isinstance(error, WeChatHTTPError):
+        return "http"
+    if isinstance(error, WeChatResponseError):
+        return "invalid_response"
+    if isinstance(error, WeChatImageError):
+        return "image"
+    if isinstance(error, ReceiptStoreError):
+        return "receipt_invalid"
+    return "local_io"
+
 
 
 def sanitize_wechat_errmsg(

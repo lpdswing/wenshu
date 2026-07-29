@@ -128,6 +128,43 @@ def test_wenshu_lists_only_visible_connectors(tmp_path):
     assert "browser" in names
     assert "slack" not in names
 
+def test_wenshu_hidden_connector_writes_fail_before_side_effects(
+    tmp_path, monkeypatch
+):
+    manager = SessionManager(workspace=tmp_path, provider=ScriptedProvider([]))
+    client = TestClient(create_app(manager))
+    calls = []
+
+    def must_not_validate(*args, **kwargs):
+        calls.append(("manual", args, kwargs))
+        raise AssertionError("hidden connector reached validation")
+
+    async def must_not_authorize(name):
+        calls.append(("mcp", name))
+        raise AssertionError("hidden connector reached OAuth")
+
+    monkeypatch.setattr("coworker.server.manager.connect_connector", must_not_validate)
+    monkeypatch.setattr(manager, "mcp_connect_connector", must_not_authorize)
+
+    manual = client.post(
+        "/v1/connectors/slack/connect",
+        json={"fields": {"bot_token": "xoxb", "app_token": "xapp"}},
+    ).json()
+    mcp = client.post("/v1/connectors/monday/mcp-connect").json()
+
+    assert manual == {
+        "ok": False,
+        "error": "connector not available in this product: slack",
+    }
+    assert mcp == {
+        "ok": False,
+        "error": "connector not available in this product: monday",
+    }
+    assert calls == []
+    assert manager.secrets.get("slack:default") is None
+    assert manager.secrets.get("monday:default") is None
+
+
 
 def test_wechat_settings_require_connected_account(tmp_path):
     manager = SessionManager(workspace=tmp_path, provider=ScriptedProvider([]))

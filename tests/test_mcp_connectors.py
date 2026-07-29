@@ -71,9 +71,13 @@ def test_tool_dicts_follow_the_profile_mode(tmp_path, monkeypatch):
     assert names and all(n.startswith("mcp__asana__") for n in names)
 
 
-def test_mcp_connect_seeds_pinned_config_and_profile(tmp_path, monkeypatch):
+def test_mcp_connect_seeds_pinned_config_and_profile(
+    tmp_path, monkeypatch, permissive_product
+):
     _state(tmp_path, monkeypatch)
-    manager = SessionManager(data_dir=tmp_path / "data")
+    manager = SessionManager(
+        data_dir=tmp_path / "data", product=permissive_product
+    )
 
     async def fake_connect(name):
         return {"ok": True, "tools": 9}
@@ -95,12 +99,16 @@ def test_mcp_connect_seeds_pinned_config_and_profile(tmp_path, monkeypatch):
     assert not out["ok"]
 
 
-def test_failed_mcp_connect_removes_the_seeded_config(tmp_path, monkeypatch):
+def test_failed_mcp_connect_removes_the_seeded_config(
+    tmp_path, monkeypatch, permissive_product
+):
     """A one-click that fails (DCR rejected, user closed the browser) must not leave
     an enabled oauth server behind — the leftover re-arms at every session start
     (owner-hit: the pulled asana attempt froze all new sessions, 2026-07-20)."""
     _state(tmp_path, monkeypatch)
-    manager = SessionManager(data_dir=tmp_path / "data")
+    manager = SessionManager(
+        data_dir=tmp_path / "data", product=permissive_product
+    )
 
     async def fail_connect(name):
         return {"ok": False, "error": "no DCR"}
@@ -111,6 +119,28 @@ def test_failed_mcp_connect_removes_the_seeded_config(tmp_path, monkeypatch):
     assert "monday" not in read_global()
     assert manager.secrets.get("monday:default") is None
 
+
+
+def test_wenshu_rejects_mcp_connector_before_oauth(tmp_path, monkeypatch):
+    _state(tmp_path, monkeypatch)
+    manager = SessionManager(data_dir=tmp_path / "data")
+    calls = []
+
+    async def must_not_connect(name):
+        calls.append(name)
+        raise AssertionError("hidden connector reached OAuth")
+
+    monkeypatch.setattr(manager, "connect_mcp", must_not_connect)
+
+    out = asyncio.run(manager.mcp_connect_connector("monday"))
+
+    assert out == {
+        "ok": False,
+        "error": "connector not available in this product: monday",
+    }
+    assert calls == []
+    assert "monday" not in read_global()
+    assert manager.secrets.get("monday:default") is None
 
 def test_prepare_mcp_tools_never_starts_an_oauth_flow(tmp_path, monkeypatch):
     """Token-less oauth servers are SKIPPED at turn start — connecting one would

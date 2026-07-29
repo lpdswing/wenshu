@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from .client import WeChatClient
-from .errors import WeChatError, WeChatResponseError
+from .errors import WeChatImageError, WeChatResponseError
 
 
 BODY_IMAGE_MAX_BYTES = 1 * 1024 * 1024
@@ -30,8 +30,6 @@ _MIN_RESIZE_FACTOR = 0.50
 _MAX_RESIZE_FACTOR = 0.85
 
 
-class WeChatImageError(WeChatError):
-    """A safe, local validation or normalization failure."""
 
 
 @dataclass(frozen=True, slots=True)

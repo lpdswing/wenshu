@@ -1111,6 +1111,11 @@ class SessionManager:
         """One-click connect for an MCP-BACKED connector (descriptor.mcp_url): seed
         the global server entry pinned to the curated allowlist, run the browser
         OAuth flow, and mark the connector profile `mode: "mcp"` on success."""
+        if name not in self.product.visible_connectors:
+            return {
+                "ok": False,
+                "error": f"connector not available in this product: {name}",
+            }
         from ..connectors.descriptors import get_descriptor
         from ..connectors.tool_defs import mcp_pinned_tools
 
@@ -1240,6 +1245,11 @@ class SessionManager:
     def connect_connector(
         self, name: str, fields: dict[str, Any], *, acknowledged: bool = False
     ) -> dict[str, Any]:
+        if name not in self.product.visible_connectors:
+            return {
+                "ok": False,
+                "error": f"connector not available in this product: {name}",
+            }
         # Validation does a blocking API call. The REST layer runs this method in a
         # worker thread; serialize the following profile write with settings updates.
         with self._connector_lock:

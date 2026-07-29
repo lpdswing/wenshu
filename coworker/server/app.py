@@ -810,6 +810,11 @@ def create_app(manager: SessionManager) -> FastAPI:
 
     @app.post("/v1/connectors/{name}/mcp-connect")
     async def connector_mcp_connect(name: str) -> dict[str, Any]:
+        if name not in manager.product.visible_connectors:
+            return {
+                "ok": False,
+                "error": f"connector not available in this product: {name}",
+            }
         # One-click connect for an MCP-backed connector: the browser OAuth flow can
         # take minutes, so it runs in the background; the GUI polls /v1/connectors
         # until the card flips to connected (mode "mcp").

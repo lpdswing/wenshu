@@ -23,14 +23,17 @@ from coworker.content.review import _BoundDirectory, _snapshot_path
 
 from .client import WeChatClient
 from .errors import (
+    ReceiptStoreError,
     WeChatAPIError,
     WeChatCredentialError,
     WeChatHTTPError,
+    WeChatImageError,
     WeChatResponseError,
     WeChatTransportError,
+    wechat_failure_kind,
 )
 from .hashing import preview_hash as calculate_preview_hash
-from .images import WeChatImageError, upload_body_image, upload_cover
+from .images import upload_body_image, upload_cover
 from .preview import DraftPreview
 from .renderer import (
     RenderedArticle,
@@ -55,8 +58,6 @@ _RECEIPT_FIELDS = {
 _MAX_STAGED_ASSET_BYTES = 20 * 1024 * 1024
 
 
-class ReceiptStoreError(ValueError):
-    """The article-local receipt cannot be read or written safely."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -557,27 +558,13 @@ def _source_url(value: str | None) -> str | None:
     return _safe_external_url(value)
 
 
-def _failure_kind(error: BaseException) -> str:
-    if isinstance(error, WeChatAPIError):
-        return error.kind
-    if isinstance(error, WeChatCredentialError):
-        return "invalid_credentials"
-    if isinstance(error, WeChatTransportError):
-        return "transport"
-    if isinstance(error, WeChatHTTPError):
-        return "http"
-    if isinstance(error, WeChatResponseError):
-        return "invalid_response"
-    if isinstance(error, WeChatImageError):
-        return "image"
-    return "local_io"
 
 
 def _failed(error: BaseException, uploaded: list[str]) -> DraftResult:
     return DraftResult(
         status="failed",
         receipt=None,
-        error_kind=_failure_kind(error),
+        error_kind=wechat_failure_kind(error),
         uploaded_assets=tuple(uploaded),
     )
 

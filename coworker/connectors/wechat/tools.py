@@ -12,15 +12,8 @@ import aisuite as ai
 
 from ...secrets import SecretStore
 from .client import WeChatClient
-from .drafts import DraftResult, ReceiptStore, ReceiptStoreError, create_draft
-from .errors import (
-    WeChatAPIError,
-    WeChatCredentialError,
-    WeChatHTTPError,
-    WeChatResponseError,
-    WeChatTransportError,
-)
-from .images import WeChatImageError
+from .drafts import DraftResult, ReceiptStore, create_draft
+from .errors import wechat_failure_kind
 from .preview import DraftPreview, prepare_preview
 
 _CHANNEL = "微信公众号"
@@ -214,22 +207,6 @@ def _safe_uploaded_assets(result: DraftResult, preview: DraftPreview) -> list[st
     ]
 
 
-def _exception_kind(error: BaseException) -> str:
-    if isinstance(error, WeChatAPIError):
-        return error.kind
-    if isinstance(error, WeChatCredentialError):
-        return "invalid_credentials"
-    if isinstance(error, WeChatTransportError):
-        return "transport"
-    if isinstance(error, WeChatHTTPError):
-        return "http"
-    if isinstance(error, WeChatResponseError):
-        return "invalid_response"
-    if isinstance(error, WeChatImageError):
-        return "image"
-    if isinstance(error, ReceiptStoreError):
-        return "receipt_invalid"
-    return "local_io"
 
 
 def _safe_result(
@@ -365,7 +342,7 @@ def make_wechat_tools(
                 assets,
             )
         except Exception as error:
-            return _safe_result("failed", refreshed.title, _exception_kind(error))
+            return _safe_result("failed", refreshed.title, wechat_failure_kind(error))
         finally:
             if client is not None:
                 try:

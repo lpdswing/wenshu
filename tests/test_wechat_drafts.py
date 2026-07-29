@@ -533,7 +533,7 @@ def test_asset_changed_after_hash_check_is_not_uploaded(tmp_path):
     result = create_draft(preview, client, store)
 
     assert result.status == "failed"
-    assert result.error_kind == "local_io"
+    assert result.error_kind == "receipt_invalid"
     assert result.uploaded_assets == ()
     assert client.calls == []
     assert not (tmp_path / "receipt.json").exists()
