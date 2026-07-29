@@ -145,6 +145,81 @@ describe("ApprovalCard — article image generation", () => {
   });
 });
 
+describe("ApprovalCard — WeChat draft creation", () => {
+  it("renders only the shared safe display fields and permits a one-time draft save", () => {
+    const onApprove = vi.fn();
+    const { container } = render(
+      <ApprovalCard
+        item={sendApproval({
+          name: "create_wechat_draft",
+          category: "connector",
+          standingTarget: "wechat_official:default",
+          args: {
+            channel: "微信公众号",
+            title: "文枢内容流水线",
+            digest: "先审文字，再完成图文排版。",
+            cover_path: "drafts/assets/cover.png",
+            image_count: 2,
+            theme: "classic",
+            color: "#1f4d3a",
+            draft_only: true,
+            article_path: "/Users/test/private/article.md",
+            preview_hash: "secret-preview-hash",
+            app_id: "wx-full-appid",
+            app_secret: "app-secret",
+            access_token: "access-token",
+            html: "<article>整篇敏感 HTML</article>",
+          },
+        })}
+        onApprove={onApprove}
+        runTask={RUN_TASK}
+      />,
+    );
+
+    const details = screen.getByTestId("wechat-draft-details");
+    expect(details.textContent).toContain("微信公众号");
+    expect(details.textContent).toContain("文枢内容流水线");
+    expect(details.textContent).toContain("先审文字，再完成图文排版。");
+    expect(details.textContent).toContain("封面 cover.png");
+    expect(details.textContent).toContain("正文图片 2 张");
+    expect(details.textContent).toContain("主题 classic · 配色 #1f4d3a");
+    expect(screen.getByText("只保存到草稿箱，不会正式发布")).toBeTruthy();
+    expect(screen.getByText("将保存到微信公众号草稿箱")).toBeTruthy();
+    expect(container.textContent).not.toMatch(
+      /\/Users\/test|secret-preview-hash|wx-full-appid|app-secret|access-token|敏感 HTML|drafts\/assets/,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "批准并保存草稿" }));
+    expect(onApprove).toHaveBeenCalledWith("once");
+    expect(screen.queryByText("本次会话始终允许")).toBeNull();
+    expect(screen.queryByText("此自动化始终允许")).toBeNull();
+    expect(screen.queryByText("始终允许此命令")).toBeNull();
+  });
+
+  it("uses safe Chinese fallbacks when optional display fields are absent", () => {
+    const { container } = render(
+      <ApprovalCard
+        item={sendApproval({
+          name: "create_wechat_draft",
+          args: { channel: "unexpected", draft_only: true },
+          resolved: "once",
+        })}
+        onApprove={vi.fn()}
+      />,
+    );
+
+    const details = screen.getByTestId("wechat-draft-details");
+    expect(details.textContent).toContain("微信公众号");
+    expect(details.textContent).toContain("标题待确认");
+    expect(details.textContent).toContain("摘要待确认");
+    expect(details.textContent).toContain("封面待确认");
+    expect(details.textContent).toContain("正文图片数量待确认");
+    expect(details.textContent).toContain("主题待确认");
+    expect(container.textContent).not.toMatch(/undefined|NaN|\[object Object\]/);
+    expect(screen.queryByRole("button", { name: "批准并保存草稿" })).toBeNull();
+  });
+});
+
 describe("ApprovalCard — §35 shapes", () => {
   it("routine file writes render as a compact row: humanized title, inline preview, Allow → once", () => {
     const onApprove = vi.fn();

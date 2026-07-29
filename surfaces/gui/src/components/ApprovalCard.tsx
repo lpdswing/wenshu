@@ -75,6 +75,9 @@ export function scopeNote(
   if (name === "generate_article_assets") {
     return { text: "将调用外部图片生成服务", external: true };
   }
+  if (name === "create_wechat_draft") {
+    return { text: "将保存到微信公众号草稿箱", external: true };
+  }
   if (category === "connector") return { text: "将在已连接的服务上执行", external: true };
   if (EXTERNAL.has(name)) {
     const platform = String(args?.target ?? "").split(":")[0];
@@ -169,6 +172,87 @@ export function ImageGenerationDetails({ args }: { args: unknown }) {
   );
 }
 
+export function WeChatDraftDetails({ display }: { display: unknown }) {
+  const fields =
+    display && typeof display === "object"
+      ? (display as Record<string, unknown>)
+      : {};
+  const channel =
+    typeof fields.channel === "string" && fields.channel.trim() === "微信公众号"
+      ? fields.channel.trim()
+      : "微信公众号";
+  const title =
+    typeof fields.title === "string" && fields.title.trim()
+      ? fields.title.trim()
+      : "标题待确认";
+  const digest =
+    typeof fields.digest === "string" && fields.digest.trim()
+      ? fields.digest.trim()
+      : "摘要待确认";
+  const coverPath =
+    typeof fields.cover_path === "string" && fields.cover_path.trim()
+      ? fields.cover_path.trim()
+      : "";
+  const cover = coverPath
+    ? coverPath.split(/[\\/]/).filter(Boolean).pop() || "封面待确认"
+    : "封面待确认";
+  const imageCount =
+    typeof fields.image_count === "number" &&
+    Number.isInteger(fields.image_count) &&
+    fields.image_count >= 0
+      ? fields.image_count
+      : null;
+  const theme =
+    typeof fields.theme === "string" && fields.theme.trim()
+      ? fields.theme.trim()
+      : "主题待确认";
+  const color =
+    typeof fields.color === "string" && fields.color.trim()
+      ? fields.color.trim()
+      : "";
+
+  return (
+    <div
+      className="mt-3 rounded-lg border border-line bg-paper px-3 py-2.5"
+      data-testid="wechat-draft-details"
+    >
+      <dl className="space-y-2">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <dt className="text-[11px] text-faint">公众号</dt>
+          <dd className="text-[12px] font-medium text-ink">{channel}</dd>
+        </div>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <dt className="text-[11px] text-faint">标题</dt>
+          <dd className="text-[12px] font-medium text-ink">{title}</dd>
+        </div>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <dt className="text-[11px] text-faint">摘要</dt>
+          <dd className="max-w-xl text-[12px] text-muted">{digest}</dd>
+        </div>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <dt className="text-[11px] text-faint">内容</dt>
+          <dd className="text-[12px] text-muted">封面 {cover}</dd>
+        </div>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <dt className="text-[11px] text-faint">配图</dt>
+          <dd className="text-[12px] text-muted">
+            {imageCount === null ? "正文图片数量待确认" : `正文图片 ${imageCount} 张`}
+          </dd>
+        </div>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <dt className="text-[11px] text-faint">样式</dt>
+          <dd className="text-[12px] text-muted">
+            主题 {theme}{color ? ` · 配色 ${color}` : ""}
+          </dd>
+        </div>
+      </dl>
+      <p className="mt-2.5 border-t border-line pt-2.5 text-[12px] font-medium text-warnInk">
+        只保存到草稿箱，不会正式发布
+      </p>
+    </div>
+  );
+}
+
 function Buttons({
   item,
   onApprove,
@@ -181,7 +265,8 @@ function Buttons({
   primaryLabel: string;
 }) {
   const connector = item.category === "connector";
-  const oneShotOnly = item.name === "generate_article_assets";
+  const oneShotOnly =
+    item.name === "generate_article_assets" || item.name === "create_wechat_draft";
   const offerStanding = !oneShotOnly && !!(runTask && item.standingTarget);
   return (
     <div className="approval-btns">
@@ -241,6 +326,7 @@ export function ApprovalCard({
   const title = humanizeApprovalTitle(item.name, item.args);
   const scope = scopeNote(item.name, item.args, item.category);
   const imageGeneration = item.name === "generate_article_assets";
+  const wechatDraftCreation = item.name === "create_wechat_draft";
   const grants = item.name === "create_scheduled_task" ? permissionLines(item.args) : [];
   // "requires approval" is the engine's default boilerplate — only surface a real reason.
   const reason = item.reason && item.reason !== "requires approval" ? item.reason : "";
@@ -283,6 +369,9 @@ export function ApprovalCard({
 
       {imageGeneration && (
         <ImageGenerationDetails args={item.args} />
+      )}
+      {wechatDraftCreation && (
+        <WeChatDraftDetails display={item.args} />
       )}
 
       {/* Tool-shaped previews — the proposal, not an args dump. */}
@@ -327,6 +416,7 @@ export function ApprovalCard({
       )}
       {/* Long-tail tools: no bespoke preview — fall back to the compact args line. */}
       {!imageGeneration &&
+        !wechatDraftCreation &&
         !FILE_WRITES.has(item.name) &&
         !["run_shell", "send_message", "send_file"].includes(item.name) &&
         !grants.length &&
@@ -340,7 +430,13 @@ export function ApprovalCard({
           item={item}
           onApprove={onApprove}
           runTask={runTask}
-          primaryLabel={imageGeneration ? "批准并生成" : "批准一次"}
+          primaryLabel={
+            imageGeneration
+              ? "批准并生成"
+              : wechatDraftCreation
+                ? "批准并保存草稿"
+                : "批准一次"
+          }
         />
       )}
     </div>

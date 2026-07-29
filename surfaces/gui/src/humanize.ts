@@ -14,9 +14,10 @@ export interface HumanLine {
 }
 
 const trunc = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
-const baseName = (p: string) => p.replace(/\/+$/, "").split("/").pop() || p;
+const baseName = (p: string) => p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || p;
 const articleLabel = (args: Record<string, unknown>): string => {
-  const title = typeof args.article_title === "string" ? args.article_title.trim() : "";
+  const titleValue = args.article_title ?? args.title;
+  const title = typeof titleValue === "string" ? titleValue.trim() : "";
   if (title) return title;
   const path = typeof args.article_path === "string" ? args.article_path.trim() : "";
   return path ? baseName(path) || "文章" : "文章";
@@ -111,6 +112,10 @@ export function humanizeTool(name: string, args: any): HumanLine {
       return { pre: "生成了文章文字预览：", obj: articleLabel(a) };
     case "generate_article_assets":
       return { pre: "为文章生成封面与配图：", obj: articleLabel(a) };
+    case "prepare_wechat_draft":
+      return { pre: "生成了公众号最终图文预览：", obj: articleLabel(a) };
+    case "create_wechat_draft":
+      return { pre: "保存到公众号草稿箱：", obj: articleLabel(a) };
     default: {
       const rest = trunc(shortArgs(a), 80);
       return { pre: `Used ${name}`, ...(rest ? { post: ` — ${rest}` } : {}) };
@@ -148,6 +153,10 @@ export function humanizeApprovalTitle(name: string, args: any): HumanLine {
       return { pre: "生成文章文字预览：", obj: articleLabel(a) };
     case "generate_article_assets":
       return { pre: "为文章生成封面与配图：", obj: articleLabel(a) };
+    case "prepare_wechat_draft":
+      return { pre: "生成公众号最终图文预览：", obj: articleLabel(a) };
+    case "create_wechat_draft":
+      return { pre: "保存到公众号草稿箱：", obj: articleLabel(a) };
     case "create_scheduled_task":
       return a.title
         ? { pre: "创建自动化 ", obj: `“${trunc(String(a.title), 60)}”` }
@@ -178,6 +187,10 @@ export function humanizeAsk(name: string, args: any): HumanLine {
       return { pre: "曾请求生成文章文字预览：", obj: articleLabel(a) };
     case "generate_article_assets":
       return { pre: "曾请求为文章生成封面与配图：", obj: articleLabel(a) };
+    case "prepare_wechat_draft":
+      return { pre: "曾请求生成公众号最终图文预览：", obj: articleLabel(a) };
+    case "create_wechat_draft":
+      return { pre: "曾请求保存到公众号草稿箱：", obj: articleLabel(a) };
     default:
       return { pre: `曾请求使用 ${name}` };
   }

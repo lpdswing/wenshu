@@ -31,6 +31,49 @@ test("article image generation → structured external approval with one-time co
   await expect(page.getByText("文章配图已生成。")).toBeVisible();
 });
 
+test("WeChat draft → safe one-time summary, real approval, localized result", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const box = page.getByPlaceholder("告诉文枢你想完成什么...");
+  await box.fill("保存公众号草稿");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  const card = page.locator(".approval").filter({ hasText: "只保存到草稿箱，不会正式发布" });
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("微信公众号");
+  await expect(card).toContainText("文枢内容流水线");
+  await expect(card).toContainText("先审文字，再完成图文排版。");
+  await expect(card).toContainText("封面 cover.png");
+  await expect(card).toContainText("正文图片 2 张");
+  await expect(card).toContainText("主题 classic · 配色 #1f4d3a");
+  await expect(card).toContainText("将保存到微信公众号草稿箱");
+  await expect(card).not.toContainText(
+    /e2e-sensitive-preview-hash|\/Users\/test\/private|drafts\/assets|preview_hash|AppID|AppSecret|access_token|<article/i,
+  );
+  await expect(
+    card.getByRole("button", { name: "批准并保存草稿", exact: true }),
+  ).toHaveCount(1);
+  await expect(
+    card.getByRole("button", { name: "本次会话始终允许", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    card.getByRole("button", { name: "此自动化始终允许", exact: true }),
+  ).toHaveCount(0);
+
+  await card.getByRole("button", { name: "批准并保存草稿", exact: true }).click();
+  await expect(page.getByText("公众号草稿处理完成。[decision=once]")).toBeVisible();
+
+  const group = page.locator("details.stepgroup").last();
+  await group.locator("summary").click();
+  const result = group.getByTestId("wechat-draft-result");
+  await expect(result).toContainText("已保存到公众号草稿箱：文枢内容流水线");
+  await expect(result).not.toContainText(/uploaded_assets|cover\.png|image-1\.png|media_id|access_token/);
+  await expect(page.locator("body")).not.toContainText(
+    /e2e-sensitive-preview-hash|\/Users\/test\/private\/drafts\/article\.md/,
+  );
+});
+
 test("routine write → compact row: humanized title, inline preview, Allow resolves", async ({
   page,
 }) => {

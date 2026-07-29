@@ -83,6 +83,110 @@ describe("TurnGroup (Transcript §33)", () => {
   });
 });
 
+describe("WeChat draft tool results", () => {
+  const cases = [
+    ["success", "已保存到公众号草稿箱"],
+    ["duplicate", "公众号草稿已存在，未重复创建"],
+    ["failed", "保存到公众号草稿箱失败"],
+    ["unknown", "提交结果未知，请先检查公众号后台"],
+  ] as const;
+
+  for (const [status, message] of cases) {
+    it(`renders ${status} in Chinese without exposing raw result values`, () => {
+      const preview = JSON.stringify({
+        status,
+        title: "文枢内容流水线",
+        error_kind: status === "failed" ? "invalid_credentials" : "",
+        uploaded_asset_count: 3,
+        uploaded_assets: ["/Users/test/private/media-1.png", "access-token-media-id"],
+        draft_only: true,
+        access_token: "access-token",
+      });
+      const items: Item[] = [
+        {
+          kind: "tool",
+          id: `wechat-${status}`,
+          name: "create_wechat_draft",
+          args: {
+            article_path: "/Users/test/private/article.md",
+            preview_hash: "secret-preview-hash",
+            theme: "classic",
+          },
+          status: "ok",
+          preview,
+        },
+      ];
+      const { container } = render(<Transcript items={items} onApprove={vi.fn()} />);
+
+      fireEvent.click(container.querySelector("summary.stepgroup-head")!);
+      const result = screen.getByTestId("wechat-draft-result");
+      expect(result.textContent).toContain(message);
+      expect(result.textContent).toContain("文枢内容流水线");
+      if (status === "failed" || status === "unknown") {
+        expect(result.textContent).toContain("不可自动回滚的已上传素材：3 个");
+      } else {
+        expect(result.textContent).not.toContain("不可自动回滚");
+      }
+      if (status === "failed") {
+        expect(result.textContent).toContain("公众号凭据无效");
+      }
+      expect(container.textContent).not.toMatch(
+        /\/Users\/test|secret-preview-hash|media-1\.png|access-token|uploaded_assets|preview_hash|<article>/,
+      );
+      expect(screen.queryByText("详情")).toBeNull();
+    });
+  }
+
+  it("degrades safely when the result preview is incomplete", () => {
+    const items: Item[] = [
+      {
+        kind: "tool",
+        id: "wechat-incomplete",
+        name: "create_wechat_draft",
+        args: { article_path: "drafts/article.md", preview_hash: "secret-preview-hash" },
+        status: "ok",
+        preview: '{"status":"unknown","title":"文枢内容流水线"',
+      },
+    ];
+    const { container } = render(<Transcript items={items} onApprove={vi.fn()} />);
+
+    fireEvent.click(container.querySelector("summary.stepgroup-head")!);
+    expect(screen.getByTestId("wechat-draft-result").textContent).toContain(
+      "公众号草稿结果暂不可读取，请先检查公众号后台",
+    );
+    expect(container.textContent).not.toContain("secret-preview-hash");
+    expect(container.textContent).not.toContain('{"status"');
+  });
+
+  it("keeps WeChat preview hashes, HTML, and absolute paths out of the DOM", () => {
+    const items: Item[] = [
+      {
+        kind: "tool",
+        id: "wechat-preview",
+        name: "prepare_wechat_draft",
+        args: {
+          article_path: "/Users/test/private/article.md",
+          theme: "classic",
+        },
+        status: "ok",
+        preview: JSON.stringify({
+          preview_hash: "secret-preview-hash",
+          html: "<article>private final article</article>",
+          article_path: "/Users/test/private/article.html",
+        }),
+      },
+    ];
+    const { container } = render(<Transcript items={items} onApprove={vi.fn()} />);
+
+    fireEvent.click(container.querySelector("summary.stepgroup-head")!);
+    expect(screen.getByText("article.md")).toBeTruthy();
+    expect(screen.queryByText("详情")).toBeNull();
+    expect(container.textContent).not.toMatch(
+      /\/Users\/test|secret-preview-hash|private final article|preview_hash|<article>/,
+    );
+  });
+});
+
 describe("live turns (§33 flicker fix)", () => {
   const LIVE: Item[] = [
     { kind: "user", text: "build the app" },
@@ -244,6 +348,39 @@ describe("humanizeTool", () => {
     ).toEqual({
       pre: "为文章生成封面与配图：",
       obj: "article.md",
+    });
+  });
+
+  it("humanizes WeChat preview and draft-save tools in Chinese", () => {
+    expect(
+      humanizeTool("prepare_wechat_draft", {
+        article_path: "drafts/final/article.md",
+      }),
+    ).toEqual({
+      pre: "生成了公众号最终图文预览：",
+      obj: "article.md",
+    });
+    expect(
+      humanizeTool("create_wechat_draft", {
+        article_path: "C:\\Users\\test\\private\\article.md",
+        preview_hash: "secret-preview-hash",
+      }),
+    ).toEqual({
+      pre: "保存到公众号草稿箱：",
+      obj: "article.md",
+    });
+    expect(
+      humanizeApprovalTitle("create_wechat_draft", {
+        channel: "微信公众号",
+        title: "文枢内容流水线",
+      }),
+    ).toEqual({
+      pre: "保存到公众号草稿箱：",
+      obj: "文枢内容流水线",
+    });
+    expect(humanizeAsk("create_wechat_draft", {})).toEqual({
+      pre: "曾请求保存到公众号草稿箱：",
+      obj: "文章",
     });
   });
 

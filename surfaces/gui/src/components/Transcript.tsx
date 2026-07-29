@@ -163,14 +163,123 @@ function LineText({ line }: { line: HumanLine }) {
   );
 }
 
+type WeChatDraftStatus = "success" | "duplicate" | "failed" | "unknown";
+
+interface WeChatDraftResult {
+  status: WeChatDraftStatus;
+  title: string;
+  errorKind: string;
+  uploadedAssetCount: number | null;
+}
+
+function parseWeChatDraftResult(preview?: string): WeChatDraftResult | null {
+  if (!preview) return null;
+  try {
+    const parsed: unknown = JSON.parse(preview);
+    if (!parsed || typeof parsed !== "object") return null;
+    const fields = parsed as Record<string, unknown>;
+    if (
+      fields.status !== "success" &&
+      fields.status !== "duplicate" &&
+      fields.status !== "failed" &&
+      fields.status !== "unknown"
+    ) {
+      return null;
+    }
+    return {
+      status: fields.status,
+      title:
+        typeof fields.title === "string" && fields.title.trim()
+          ? fields.title.trim()
+          : "",
+      errorKind:
+        typeof fields.error_kind === "string" ? fields.error_kind.trim() : "",
+      uploadedAssetCount:
+        typeof fields.uploaded_asset_count === "number" &&
+        Number.isInteger(fields.uploaded_asset_count) &&
+        fields.uploaded_asset_count >= 0
+          ? fields.uploaded_asset_count
+          : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function WeChatDraftResultLine({ result }: { result: WeChatDraftResult | null }) {
+  if (!result) {
+    return (
+      <div className="text-[12px] text-warnInk" data-testid="wechat-draft-result">
+        公众号草稿结果暂不可读取，请先检查公众号后台
+      </div>
+    );
+  }
+
+  const statusText: Record<WeChatDraftStatus, string> = {
+    success: "已保存到公众号草稿箱",
+    duplicate: "公众号草稿已存在，未重复创建",
+    failed: "保存到公众号草稿箱失败",
+    unknown: "提交结果未知，请先检查公众号后台",
+  };
+  const errorText: Record<string, string> = {
+    invalid_credentials: "公众号凭据无效",
+    ip_allowlist: "公众号 IP 白名单未配置",
+    permission_denied: "公众号接口权限不足",
+    rate_limited: "公众号接口请求过于频繁",
+    timeout: "连接公众号超时",
+    network: "无法连接公众号",
+  };
+  const uncertain = result.status === "failed" || result.status === "unknown";
+  const tone =
+    result.status === "success" || result.status === "duplicate"
+      ? "text-ok"
+      : result.status === "unknown"
+        ? "text-warnInk"
+        : "text-danger";
+
+  return (
+    <div className="space-y-1 text-[12px]" data-testid="wechat-draft-result">
+      <div className={tone}>
+        {statusText[result.status]}
+        {result.title ? `：${result.title}` : ""}
+      </div>
+      {result.status === "failed" && errorText[result.errorKind] && (
+        <div className="text-muted">{errorText[result.errorKind]}</div>
+      )}
+      {uncertain && (
+        <div className="text-muted">
+          {result.uploadedAssetCount === null
+            ? "不可自动回滚的已上传素材数量待确认"
+            : `不可自动回滚的已上传素材：${result.uploadedAssetCount} 个`}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StepRow({ tool, approval }: { tool: ToolItem; approval?: ApprovalItem }) {
   const [raw, setRaw] = useState(false);
   const running = tool.status === "…";
-  const failed = tool.status !== "ok" && !running;
+  const wechatDraftResult =
+    tool.name === "create_wechat_draft"
+      ? parseWeChatDraftResult(tool.preview)
+      : null;
+  const failed = wechatDraftResult
+    ? wechatDraftResult.status === "failed"
+    : tool.status !== "ok" && !running;
+  const statusTone = running
+    ? "text-accent"
+    : wechatDraftResult?.status === "unknown"
+      ? "text-warnInk"
+      : failed
+        ? "text-danger"
+        : "text-ok";
+  const showRawDetails =
+    tool.name !== "prepare_wechat_draft" && tool.name !== "create_wechat_draft";
   return (
     <div>
       <div className="group flex items-baseline gap-2 px-2 py-0.5 rounded-lg hover:bg-paper" data-testid="turn-step">
-        <span className={"w-3.5 text-center text-[10px] shrink-0 " + (failed ? "text-danger" : running ? "text-accent" : "text-ok")}>
+        <span className={"w-3.5 text-center text-[10px] shrink-0 " + statusTone}>
           {running ? <span className="spinner" data-testid="step-running" /> : "●"}
         </span>
         <LineText line={humanizeTool(tool.name, tool.args)} />
@@ -193,8 +302,10 @@ function StepRow({ tool, approval }: { tool: ToolItem; approval?: ApprovalItem }
             已隐藏 {tool.hidden} 项
           </span>
         )}
-        {failed && <span className="text-[11px] text-danger shrink-0">{tool.status}</span>}
-        {!running && (
+        {failed && !wechatDraftResult && (
+          <span className="text-[11px] text-danger shrink-0">{tool.status}</span>
+        )}
+        {!running && showRawDetails && (
           <button
             className="ml-auto shrink-0 text-[11px] text-faint opacity-0 group-hover:opacity-100 cursor-pointer"
             onClick={() => setRaw((v) => !v)}
@@ -203,7 +314,12 @@ function StepRow({ tool, approval }: { tool: ToolItem; approval?: ApprovalItem }
           </button>
         )}
       </div>
-      {raw && (
+      {tool.name === "create_wechat_draft" && !running && tool.preview && (
+        <div className="ml-8 mr-2 my-1 px-2.5 py-1.5 rounded-lg border border-line bg-paper">
+          <WeChatDraftResultLine result={wechatDraftResult} />
+        </div>
+      )}
+      {raw && showRawDetails && (
         <pre className="ml-8 mr-2 my-1 px-2.5 py-1.5 rounded-lg border border-line bg-paper font-mono text-[11.5px] leading-relaxed text-muted whitespace-pre-wrap break-words max-h-56 overflow-auto">
           {`${tool.name}  ${shortArgs(tool.args)}`}
           {tool.preview ? `\n→ ${tool.preview.length > 1500 ? tool.preview.slice(0, 1500) + "\n…" : tool.preview}` : ""}

@@ -733,6 +733,35 @@ export async function mockApi(
           });
           return;
         }
+        if (/保存公众号草稿/.test(msg.text)) {
+          pendingTool = "create_wechat_draft";
+          send("tool_proposed", {
+            name: "create_wechat_draft",
+            arguments: {
+              article_path: "/Users/test/private/drafts/article.md",
+              preview_hash: "e2e-sensitive-preview-hash",
+              theme: "classic",
+              color: "#1f4d3a",
+              cover_path: "drafts/assets/cover.png",
+            },
+          });
+          send("permission_required", {
+            name: "create_wechat_draft",
+            arguments: {
+              channel: "微信公众号",
+              title: "文枢内容流水线",
+              digest: "先审文字，再完成图文排版。",
+              cover_path: "drafts/assets/cover.png",
+              image_count: 2,
+              theme: "classic",
+              color: "#1f4d3a",
+              draft_only: true,
+            },
+            reason: "",
+            category: "connector",
+          });
+          return;
+        }
         if (/(?:run a tool|运行一个工具)/i.test(msg.text)) {
           pendingTool = "run_shell";
           send("tool_proposed", { name: "run_shell", arguments: { command: "ls" } });
@@ -859,7 +888,28 @@ export async function mockApi(
         send("assistant_message", { text: `Echo: ${msg.text} [model=${msg.model || "none"}]` });
         send("turn_done");
       } else if (msg.type === "approval") {
-        if (pendingTool === "generate_article_assets") {
+        if (pendingTool === "create_wechat_draft") {
+          if (msg.decision === "deny") {
+            send("tool_finished", { name: pendingTool, status: "denied" });
+            send("assistant_message", { text: "已取消保存公众号草稿。" });
+          } else {
+            send("tool_finished", {
+              name: pendingTool,
+              status: "ok",
+              result_preview: JSON.stringify({
+                status: "success",
+                title: "文枢内容流水线",
+                error_kind: "",
+                uploaded_asset_count: 3,
+                uploaded_assets: ["cover.png", "image-1.png", "image-2.png"],
+                draft_only: true,
+              }),
+            });
+            send("assistant_message", {
+              text: `公众号草稿处理完成。[decision=${msg.decision}]`,
+            });
+          }
+        } else if (pendingTool === "generate_article_assets") {
           if (msg.decision === "deny") {
             send("tool_finished", { name: pendingTool, status: "denied" });
             send("assistant_message", { text: "已取消生成文章配图。" });
