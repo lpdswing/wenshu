@@ -31,6 +31,8 @@ _BASE: dict[str, RiskClass] = {
     SHELL_TOOL: RiskClass.EXEC,
     "prepare_article_review": RiskClass.WRITE_LOCAL,
     "generate_article_assets": RiskClass.EXTERNAL,
+    "prepare_wechat_draft": RiskClass.WRITE_LOCAL,
+    "create_wechat_draft": RiskClass.EXTERNAL,
 }
 
 # A user-local override resolver: tool name -> RiskClass (or None to defer to the base).

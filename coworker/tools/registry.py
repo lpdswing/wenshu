@@ -17,6 +17,7 @@ from aisuite.utils.tools import Tools
 
 # Host-only approval presentation; it is never part of a model schema or tool execution.
 ApprovalArguments = Callable[[dict[str, Any]], Mapping[str, Any]]
+_UNSET = object()
 
 
 @dataclass
@@ -39,8 +40,8 @@ class ToolRegistry:
         *,
         metadata: Any = None,
         schema: Optional[dict[str, Any]] = None,
-        approval_arguments: Optional[ApprovalArguments] = None,
-        approval_once_only: bool = False,
+        approval_arguments: Any = _UNSET,
+        approval_once_only: Any = _UNSET,
     ) -> ToolSpec:
         name = getattr(func, "__name__", None)
         if not name:
@@ -51,13 +52,23 @@ class ToolRegistry:
         resolved_schema = (
             schema or getattr(func, "__coworker_schema__", None) or _schema_for(func)
         )
+        resolved_approval_arguments = (
+            getattr(func, "__coworker_approval_arguments__", None)
+            if approval_arguments is _UNSET
+            else approval_arguments
+        )
+        resolved_approval_once_only = (
+            bool(getattr(func, "__coworker_approval_once_only__", False))
+            if approval_once_only is _UNSET
+            else bool(approval_once_only)
+        )
         spec = ToolSpec(
             name=name,
             schema=resolved_schema,
             func=func,
             metadata=meta,
-            approval_arguments=approval_arguments,
-            approval_once_only=approval_once_only,
+            approval_arguments=resolved_approval_arguments,
+            approval_once_only=resolved_approval_once_only,
         )
         self._tools[name] = spec
         return spec

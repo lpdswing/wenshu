@@ -1089,6 +1089,20 @@ TOOL_DEFS: tuple[ConnectorToolDef, ...] = (
         "read",
         "Poll an export job for download URLs.",
     ),
+    ConnectorToolDef(
+        "wechat_official",
+        "prepare_wechat_draft",
+        "Prepare draft preview",
+        "write",
+        "Generate a local review preview for a WeChat draft.",
+    ),
+    ConnectorToolDef(
+        "wechat_official",
+        "create_wechat_draft",
+        "Save draft",
+        "write",
+        "Save the reviewed article to the WeChat draft box; never publish it.",
+    ),
 )
 
 _KIND_BY_NAME = {d.name: d.kind for d in TOOL_DEFS}
