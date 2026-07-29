@@ -43,6 +43,7 @@ class PermissionRequest:
     reason: str
     tool_call_id: Optional[str] = None  # for durable resume (idempotent inbox item)
     display_arguments: Optional[dict[str, Any]] = None
+    approval_once_only: bool = False
 
 
 Approver = Callable[[PermissionRequest], Awaitable[ApprovalOutcome]]
@@ -592,6 +593,9 @@ class TurnEngine:
                         metadata,
                         self.permissions.risk_overrides,
                     ),
+                    "approval_once_only": bool(
+                        spec and spec.approval_once_only
+                    ),
                 },
             )
             self._audit(tool_call, stage="approval_requested", reason=decision.reason)
@@ -604,6 +608,7 @@ class TurnEngine:
                         reason=decision.reason,
                         tool_call_id=tool_call.id,
                         display_arguments=display_arguments,
+                        approval_once_only=bool(spec and spec.approval_once_only),
                     )
                 ),
                 interrupted=ApprovalOutcome.DENY,

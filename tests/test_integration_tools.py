@@ -386,6 +386,44 @@ def test_create_reprepares_with_cached_comments_and_rejects_changed_hash_before_
 
 
 @pytest.mark.parametrize(
+    ("profile_changes", "expected_error"),
+    [
+        ({"enabled": False}, "not_connected"),
+        (
+            {
+                "need_open_comment": False,
+                "only_fans_can_comment": False,
+            },
+            "preview_changed",
+        ),
+    ],
+)
+def test_create_rechecks_live_connector_state_before_client(
+    tmp_path,
+    profile_changes,
+    expected_error,
+):
+    secrets = _secrets(tmp_path)
+    clients = []
+    prepare_tool, create_tool = make_wechat_tools(
+        secrets,
+        roots=[tmp_path],
+        preview_factory=lambda *args, **kwargs: _preview(tmp_path),
+        client_factory=lambda store: clients.append(store),
+    )
+    prepare_tool("article.md", "default", cover_path="images/cover.png")
+    profile = secrets.get("wechat_official:default")
+    profile.update(profile_changes)
+    secrets.put("wechat_official:default", profile)
+
+    result = create_tool(**_arguments())
+
+    assert result["status"] == "failed"
+    assert result["error_kind"] == expected_error
+    assert clients == []
+
+
+@pytest.mark.parametrize(
     ("status", "error_kind"),
     [
         ("success", None),
@@ -438,7 +476,7 @@ def test_create_returns_only_safe_four_state_result_and_closes_client(
     prepare_tool("article.md", "default", cover_path="images/cover.png")
     result = create_tool(**_arguments())
 
-    assert result == {
+    summary = {
         "status": status,
         "title": "安全标题",
         "error_kind": error_kind,
@@ -446,6 +484,7 @@ def test_create_returns_only_safe_four_state_result_and_closes_client(
         "uploaded_assets": ["body:images/body.png", "cover:images/cover.png"],
         "draft_only": True,
     }
+    assert result == {**summary, "_display": {"wechat_draft_result": summary}}
     assert sequence == ["prepare", "prepare", "client", "draft", "close"]
     serialized = json.dumps(result, ensure_ascii=False)
     assert _SECRET not in serialized

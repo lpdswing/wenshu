@@ -241,7 +241,7 @@ def _safe_result(
     canonical_status = status if status in {"success", "duplicate", "failed", "unknown"} else "failed"
     canonical_error = error_kind if error_kind in _SAFE_ERROR_KINDS else None
     assets = list(uploaded_assets)
-    return {
+    summary = {
         "status": canonical_status,
         "title": title,
         "error_kind": canonical_error,
@@ -249,6 +249,7 @@ def _safe_result(
         "uploaded_assets": assets,
         "draft_only": True,
     }
+    return {**summary, "_display": {"wechat_draft_result": summary}}
 
 
 def make_wechat_tools(
@@ -336,6 +337,18 @@ def make_wechat_tools(
             return _safe_result("failed", previous.title, "preview_changed")
         if not _same_hash(refreshed.preview_hash, previous.preview_hash) or not _same_hash(
             refreshed.preview_hash, preview_hash
+        ):
+            return _safe_result("failed", previous.title, "preview_changed")
+
+        try:
+            current_settings = _connected_settings(secrets)
+        except Exception:
+            return _safe_result("failed", previous.title, "local_io")
+        if current_settings is None:
+            return _safe_result("failed", previous.title, "not_connected")
+        if current_settings != (
+            previous.need_open_comment,
+            previous.only_fans_can_comment,
         ):
             return _safe_result("failed", previous.title, "preview_changed")
 

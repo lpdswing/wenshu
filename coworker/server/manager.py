@@ -2687,6 +2687,8 @@ class SessionManager:
             "tool": request.tool_name,
             "arguments": _presented_arguments(request),
         }
+        if bool(getattr(request, "approval_once_only", False)):
+            data["approval_once_only"] = True
         task = self.task_store.task_for_run_session(session_id)
         if task is None:
             return data

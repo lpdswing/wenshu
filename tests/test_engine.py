@@ -270,12 +270,14 @@ def test_approval_arguments_are_display_only(tmp_path):
 
 def test_one_shot_tool_rejects_persistent_approval_scope(tmp_path):
     executed: list[str] = []
+    requests: list[PermissionRequest] = []
 
     def paid_tool(value: str) -> str:
         executed.append(value)
         return value
 
-    async def approve_persistently(_request: PermissionRequest):
+    async def approve_persistently(request: PermissionRequest):
+        requests.append(request)
         return ApprovalOutcome.ALWAYS_TOOL
 
     registry = ToolRegistry()
@@ -302,6 +304,12 @@ def test_one_shot_tool_rejects_persistent_approval_scope(tmp_path):
 
     events = _collect(engine, "run paid tool")
 
+    permission = next(
+        event for event in events if event.type is EventType.PERMISSION_REQUIRED
+    )
+    assert permission.data["approval_once_only"] is True
+    assert requests[0].approval_once_only is True
+
     finished = next(
         event for event in events if event.type is EventType.TOOL_FINISHED
     )
@@ -309,6 +317,56 @@ def test_one_shot_tool_rejects_persistent_approval_scope(tmp_path):
     assert finished.data["reason"] == "persistent approval is not allowed for this tool"
     assert executed == []
     assert "paid_tool" not in engine.permissions.session_allow_tools
+
+
+def test_tool_result_display_sidecar_is_not_truncated_or_sent_to_provider(tmp_path):
+    display = {
+        "wechat_draft_result": {
+            "status": "unknown",
+            "title": "文枢内容流水线",
+            "error_kind": "transport",
+            "uploaded_asset_count": 3,
+            "draft_only": True,
+        }
+    }
+
+    def draft_result():
+        return {
+            "status": "unknown",
+            "payload": "x" * 600,
+            "_display": display,
+        }
+
+    registry = ToolRegistry()
+    registry.register(
+        draft_result,
+        metadata=ai.ToolMetadata(
+            name="draft_result",
+            category="connector",
+            risk_level="low",
+            capabilities=["test"],
+            requires_approval=False,
+        ),
+    )
+    engine = TurnEngine(
+        provider=ScriptedProvider(
+            [_tool_turn("draft_result", {}), _text_turn("done")]
+        ),
+        registry=registry,
+        permissions=PermissionEngine(workspace_root=tmp_path),
+        model="gpt-5.5",
+    )
+
+    events = _collect(engine, "run")
+
+    finished = next(
+        event for event in events if event.type is EventType.TOOL_FINISHED
+    )
+    assert finished.data["display"] == display
+    assert len(finished.data["result_preview"]) <= 300
+    tool_message = next(message for message in engine.messages if message["role"] == "tool")
+    assert tool_message["_display"] == display
+    assert "_display" not in tool_message["content"]
 
 
 def test_approval_arguments_failure_falls_back_without_skipping_approval(tmp_path):

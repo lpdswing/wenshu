@@ -147,6 +147,7 @@ def test_parked_approval_payload_uses_display_arguments_only_for_presentation():
         metadata=None,
         reason="paid operation",
         display_arguments=display_arguments,
+        approval_once_only=True,
     )
 
     class NoTasks:
@@ -162,6 +163,7 @@ def test_parked_approval_payload_uses_display_arguments_only_for_presentation():
     assert data == {
         "tool": "generate_article_assets",
         "arguments": display_arguments,
+        "approval_once_only": True,
     }
     assert request.arguments == arguments
     body = _approval_body(request)
