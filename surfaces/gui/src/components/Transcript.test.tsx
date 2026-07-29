@@ -93,15 +93,17 @@ describe("WeChat draft tool results", () => {
 
   for (const [status, message] of cases) {
     it(`renders ${status} in Chinese without exposing raw result values`, () => {
-      const preview = JSON.stringify({
-        status,
-        title: "文枢内容流水线",
-        error_kind: status === "failed" ? "invalid_credentials" : "",
-        uploaded_asset_count: 3,
-        uploaded_assets: ["/Users/test/private/media-1.png", "access-token-media-id"],
-        draft_only: true,
-        access_token: "access-token",
-      });
+      const display = {
+        wechat_draft_result: {
+          status,
+          title: "文枢内容流水线",
+          error_kind: status === "failed" ? "invalid_credentials" : "",
+          uploaded_asset_count: 3,
+          uploaded_assets: ["/Users/test/private/media-1.png", "access-token-media-id"],
+          draft_only: true,
+          access_token: "access-token",
+        },
+      };
       const items: Item[] = [
         {
           kind: "tool",
@@ -113,7 +115,8 @@ describe("WeChat draft tool results", () => {
             theme: "classic",
           },
           status: "ok",
-          preview,
+          preview: '{"status":"truncated"',
+          display,
         },
       ];
       const { container } = render(<Transcript items={items} onApprove={vi.fn()} />);
@@ -137,7 +140,7 @@ describe("WeChat draft tool results", () => {
     });
   }
 
-  it("degrades safely when the result preview is incomplete", () => {
+  it("ignores a result preview when structured display metadata is missing", () => {
     const items: Item[] = [
       {
         kind: "tool",
@@ -145,7 +148,7 @@ describe("WeChat draft tool results", () => {
         name: "create_wechat_draft",
         args: { article_path: "drafts/article.md", preview_hash: "secret-preview-hash" },
         status: "ok",
-        preview: '{"status":"unknown","title":"文枢内容流水线"',
+        preview: '{"status":"unknown","title":"文枢内容流水线"}',
       },
     ];
     const { container } = render(<Transcript items={items} onApprove={vi.fn()} />);

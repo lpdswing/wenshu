@@ -33,6 +33,42 @@ describe("itemsFromMessages _display sidecar", () => {
   });
 });
 
+  it("preserves structured WeChat result display metadata on replay", () => {
+    const summary = {
+      status: "unknown",
+      title: "文枢内容流水线",
+      error_kind: "transport",
+      uploaded_asset_count: 3,
+      draft_only: true,
+    };
+    const items = itemsFromMessages([
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          {
+            id: "wechat-call",
+            function: {
+              name: "create_wechat_draft",
+              arguments: '{"article_path":"article.md"}',
+            },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        tool_call_id: "wechat-call",
+        content: '{"status":"unknown","title":"truncated',
+        _display: { wechat_draft_result: summary },
+      },
+    ]);
+
+    const tool = items.find((item) => item.kind === "tool");
+    expect(tool?.kind).toBe("tool");
+    if (tool?.kind !== "tool") throw new Error("tool item missing");
+    expect(tool.display?.wechat_draft_result).toEqual(summary);
+  });
+
 describe("itemsFromMessages timestamps", () => {
   it("carries the server ts through to user/assistant items; pre-stamp history gets none", () => {
     const items = itemsFromMessages([

@@ -55,12 +55,23 @@ export function itemsFromMessages(messages: ConversationMessage[]): Item[] {
   // `_display` sidecar on a tool message = user-facing metadata the agent never saw
   // (e.g. how many hits the privacy filters hid) — surfaces on the tool card.
   const hiddenCounts: Record<string, number> = {};
+  const displays: Record<string, Record<string, unknown>> = {};
   for (const m of messages || []) {
     if (m.role === "tool" && m.tool_call_id) {
       results[m.tool_call_id] =
         typeof m.content === "string" ? m.content : JSON.stringify(m.content);
       const hidden = Number(m._display?.hidden_by_filters || 0);
       if (hidden > 0) hiddenCounts[m.tool_call_id] = hidden;
+      const rawDisplay: unknown = m._display;
+      if (
+        rawDisplay &&
+        typeof rawDisplay === "object" &&
+        "wechat_draft_result" in rawDisplay
+      ) {
+        displays[m.tool_call_id] = {
+          wechat_draft_result: rawDisplay.wechat_draft_result,
+        };
+      }
     }
   }
   for (const m of messages || []) {
@@ -92,6 +103,7 @@ export function itemsFromMessages(messages: ConversationMessage[]): Item[] {
         }
         const preview = results[tc.id];
         const hidden = hiddenCounts[tc.id];
+        const display = displays[tc.id];
         items.push({
           kind: "tool",
           id: tc.id,
@@ -100,6 +112,7 @@ export function itemsFromMessages(messages: ConversationMessage[]): Item[] {
           status: "ok",
           preview,
           ...(hidden ? { hidden } : {}),
+          ...(display ? { display } : {}),
         });
       }
     } else if (m.role === "notice") {

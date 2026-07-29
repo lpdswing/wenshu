@@ -675,6 +675,7 @@ export function App() {
               d.name,
               d.status,
               d.result_preview || d.reason,
+              d.display,
               d.display?.hidden_by_filters,
               d.standing_rule,
             ),
@@ -1686,6 +1687,7 @@ function updateLastTool(
   name: string,
   status: string,
   preview?: string,
+  display?: Record<string, unknown>,
   hidden?: number,
   standingRule?: string,
 ): Item[] {
@@ -1697,6 +1699,7 @@ function updateLastTool(
         ...it,
         status,
         preview,
+        ...(display ? { display } : {}),
         ...(hidden ? { hidden } : {}),
         ...(standingRule ? { standingRule } : {}),
       };

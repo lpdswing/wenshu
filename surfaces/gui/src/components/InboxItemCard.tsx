@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import type { InboxItem } from "../api";
 import { humanizeApprovalTitle } from "../humanize";
-import { ImageGenerationDetails, PreviewBlock, scopeNote, TitleText } from "./ApprovalCard";
+import { ImageGenerationDetails, PreviewBlock, scopeNote, TitleText, WeChatDraftDetails } from "./ApprovalCard";
 
 // One Inbox item, rendered identically in the Inbox list and inline in its own session view
 // (answer-in-context). Resolving either place hits the same item id — first responder wins.
@@ -50,6 +50,10 @@ export function InboxItemCard({
   const allowText = item.allow_text !== false;
   const imageGeneration =
     item.kind === "approval" && item.data?.tool === "generate_article_assets";
+  const wechatDraftCreation =
+    item.kind === "approval" && item.data?.tool === "create_wechat_draft";
+  const oneShotOnly =
+    imageGeneration || wechatDraftCreation || item.data?.approval_once_only === true;
 
   const textRow = (placeholder: string) => (
     <div className="flex items-center gap-2 mt-2.5">
@@ -99,6 +103,8 @@ export function InboxItemCard({
       )}
       {imageGeneration ? (
         <ImageGenerationDetails args={item.data?.arguments} />
+      ) : wechatDraftCreation ? (
+        <WeChatDraftDetails display={item.data?.arguments} />
       ) : item.kind === "approval" && item.data?.tool && typeof item.data.arguments?.content === "string" ? (
         <PreviewBlock text={item.data.arguments.content} />
       ) : item.kind === "approval" && item.data?.tool && typeof item.data.arguments?.command === "string" ? (
@@ -113,12 +119,18 @@ export function InboxItemCard({
             className={item.data?.tool ? BTN_ACCENT : BTN_PRIMARY}
             onClick={() => onResolve(item.id, "allow")}
           >
-            {imageGeneration ? "批准并生成" : item.data?.tool ? "批准一次" : "批准"}
+            {imageGeneration
+              ? "批准并生成"
+              : wechatDraftCreation
+                ? "批准并保存草稿"
+                : item.data?.tool
+                  ? "批准一次"
+                  : "批准"}
           </button>
           {/* Task-persistent standing grant (§25) — present only when the approval was
               raised inside an automation run AND the call can carry a tool+target rule.
               In-app only by construction: Slack mirrors render Approve/Deny buttons. */}
-          {!imageGeneration && item.data?.task_id && item.data?.standing_target && (
+          {!oneShotOnly && item.data?.task_id && item.data?.standing_target && (
             <button
               className={BTN_BORDERED}
               title={`始终允许 ${item.data.standing_target} 用于“${item.data.task_title || "此自动化"}”；可随时在“自动化”页面撤销`}

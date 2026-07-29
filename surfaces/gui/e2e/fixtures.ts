@@ -896,14 +896,17 @@ export async function mockApi(
             send("tool_finished", {
               name: pendingTool,
               status: "ok",
-              result_preview: JSON.stringify({
-                status: "success",
-                title: "文枢内容流水线",
-                error_kind: "",
-                uploaded_asset_count: 3,
-                uploaded_assets: ["cover.png", "image-1.png", "image-2.png"],
-                draft_only: true,
-              }),
+              result_preview: '{"status":"success","title":"truncated',
+              display: {
+                wechat_draft_result: {
+                  status: "success",
+                  title: "文枢内容流水线",
+                  error_kind: "",
+                  uploaded_asset_count: 3,
+                  uploaded_assets: ["cover.png", "image-1.png", "image-2.png"],
+                  draft_only: true,
+                },
+              },
             });
             send("assistant_message", {
               text: `公众号草稿处理完成。[decision=${msg.decision}]`,

@@ -172,38 +172,32 @@ interface WeChatDraftResult {
   uploadedAssetCount: number | null;
 }
 
-function parseWeChatDraftResult(preview?: string): WeChatDraftResult | null {
-  if (!preview) return null;
-  try {
-    const parsed: unknown = JSON.parse(preview);
-    if (!parsed || typeof parsed !== "object") return null;
-    const fields = parsed as Record<string, unknown>;
-    if (
-      fields.status !== "success" &&
-      fields.status !== "duplicate" &&
-      fields.status !== "failed" &&
-      fields.status !== "unknown"
-    ) {
-      return null;
-    }
-    return {
-      status: fields.status,
-      title:
-        typeof fields.title === "string" && fields.title.trim()
-          ? fields.title.trim()
-          : "",
-      errorKind:
-        typeof fields.error_kind === "string" ? fields.error_kind.trim() : "",
-      uploadedAssetCount:
-        typeof fields.uploaded_asset_count === "number" &&
-        Number.isInteger(fields.uploaded_asset_count) &&
-        fields.uploaded_asset_count >= 0
-          ? fields.uploaded_asset_count
-          : null,
-    };
-  } catch {
+function parseWeChatDraftResult(value: unknown): WeChatDraftResult | null {
+  if (!value || typeof value !== "object") return null;
+  if (
+    !("status" in value) ||
+    (value.status !== "success" &&
+      value.status !== "duplicate" &&
+      value.status !== "failed" &&
+      value.status !== "unknown")
+  ) {
     return null;
   }
+  const title = "title" in value ? value.title : undefined;
+  const errorKind = "error_kind" in value ? value.error_kind : undefined;
+  const uploadedAssetCount =
+    "uploaded_asset_count" in value ? value.uploaded_asset_count : undefined;
+  return {
+    status: value.status,
+    title: typeof title === "string" && title.trim() ? title.trim() : "",
+    errorKind: typeof errorKind === "string" ? errorKind.trim() : "",
+    uploadedAssetCount:
+      typeof uploadedAssetCount === "number" &&
+      Number.isInteger(uploadedAssetCount) &&
+      uploadedAssetCount >= 0
+        ? uploadedAssetCount
+        : null,
+  };
 }
 
 function WeChatDraftResultLine({ result }: { result: WeChatDraftResult | null }) {
@@ -262,7 +256,7 @@ function StepRow({ tool, approval }: { tool: ToolItem; approval?: ApprovalItem }
   const running = tool.status === "…";
   const wechatDraftResult =
     tool.name === "create_wechat_draft"
-      ? parseWeChatDraftResult(tool.preview)
+      ? parseWeChatDraftResult(tool.display?.wechat_draft_result)
       : null;
   const failed = wechatDraftResult
     ? wechatDraftResult.status === "failed"
