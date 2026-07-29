@@ -158,10 +158,10 @@ from ..attachments import (
     build_user_content,
 )
 from ..engine import ApprovalOutcome
-from ..inbox import VIS_INBOX, VIS_INLINE, args_preview
+from ..inbox import VIS_INBOX, VIS_INLINE
 from ..permissions import Mode
 from ..providers import AssistantTurn
-from .manager import SessionManager
+from .manager import SessionManager, _approval_body
 
 
 def create_app(manager: SessionManager) -> FastAPI:
@@ -1561,14 +1561,7 @@ def create_app(manager: SessionManager) -> FastAPI:
             item = manager.inbox.add_approval(
                 session_id,
                 f"Run `{_request.tool_name}`?",
-                body="\n".join(
-                    p
-                    for p in (
-                        (getattr(_request, "reason", "") or "").strip(),
-                        args_preview(getattr(_request, "arguments", None)),
-                    )
-                    if p
-                ),
+                body=_approval_body(_request),
                 inbox=_route(),
                 visibility=_visibility(),
                 # Automation-run context (manual "Run now" rides this socket): lets the

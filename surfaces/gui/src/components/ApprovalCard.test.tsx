@@ -82,6 +82,69 @@ describe("ApprovalCard — standing scoped approvals (§25)", () => {
   });
 });
 
+describe("ApprovalCard — article image generation", () => {
+  it("shows article, provider, model and total before offering one-time approval", () => {
+    const onApprove = vi.fn();
+    render(
+      <ApprovalCard
+        item={sendApproval({
+          name: "generate_article_assets",
+          category: "content-generation",
+          standingTarget: "article-assets",
+          args: {
+            article_path: "drafts/article.md",
+            reviewed_hash: "secret-reviewed-hash",
+            cover_request: { prompt: "raw cover prompt" },
+            illustration_plan: [{ prompt: "raw illustration prompt" }],
+            article_title: "文枢内容流水线",
+            provider: "OpenAI",
+            model: "gpt-image-2",
+            total_images: 4,
+          },
+        })}
+        onApprove={onApprove}
+        runTask={RUN_TASK}
+      />,
+    );
+
+    const details = screen.getByTestId("image-generation-details");
+    const card = details.closest(".approval");
+    expect(card?.textContent).toContain("文枢内容流水线");
+    expect(screen.getByText("OpenAI · gpt-image-2")).toBeTruthy();
+    expect(screen.getByText("预计生成 4 张图片")).toBeTruthy();
+    expect(screen.getByText("将调用外部图片生成服务")).toBeTruthy();
+    expect(screen.queryByText(/secret-reviewed-hash|raw cover prompt|raw illustration prompt/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "批准并生成" }));
+    expect(onApprove).toHaveBeenCalledWith("once");
+    expect(screen.getByRole("button", { name: "拒绝" })).toBeTruthy();
+    expect(screen.queryByText("本次会话始终允许")).toBeNull();
+    expect(screen.queryByText("此自动化始终允许")).toBeNull();
+  });
+
+  it("uses safe Chinese fallbacks and keeps the resolved layout when host display fields are absent", () => {
+    render(
+      <ApprovalCard
+        item={sendApproval({
+          name: "generate_article_assets",
+          args: { article_path: "drafts/article.md", reviewed_hash: "secret-reviewed-hash" },
+          resolved: "once",
+        })}
+        onApprove={vi.fn()}
+      />,
+    );
+
+    const card = screen.getByTestId("image-generation-details").closest(".approval");
+    expect(card?.textContent).toContain("article.md");
+    expect(card?.textContent).toContain("外部图片服务 · 模型待确认");
+    expect(card?.textContent).toContain("图片数量以本次生成计划为准");
+    expect(card?.textContent).toContain("已处理：批准一次");
+    expect(card?.textContent).not.toMatch(/undefined|NaN/);
+    expect(screen.queryByRole("button", { name: "批准并生成" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "拒绝" })).toBeNull();
+  });
+});
+
 describe("ApprovalCard — §35 shapes", () => {
   it("routine file writes render as a compact row: humanized title, inline preview, Allow → once", () => {
     const onApprove = vi.fn();
@@ -196,6 +259,40 @@ describe("InboxItemCard — Allow every time on parked run approvals", () => {
     expect(screen.queryByText("此自动化始终允许")).toBeNull();
     expect(screen.getByText("批准")).toBeTruthy();
     expect(screen.getByText("拒绝")).toBeTruthy();
+  });
+
+  it("keeps parked image generation one-time and hides raw approval payloads", () => {
+    const onResolve = vi.fn();
+    render(
+      <InboxItemCard
+        item={{
+          ...baseItem({
+            tool: "generate_article_assets",
+            arguments: {
+              article_path: "drafts/article.md",
+              article_title: "文枢内容流水线",
+              provider: "OpenAI",
+              model: "gpt-image-2",
+              total_images: 4,
+            },
+            task_id: "task-1",
+            task_title: "Weekly digest",
+            standing_target: "article-assets",
+          }),
+          body: "reviewed_hash=secret-reviewed-hash prompt=raw image prompt",
+        }}
+        onResolve={onResolve}
+      />,
+    );
+
+    expect(screen.getByText("OpenAI · gpt-image-2")).toBeTruthy();
+    expect(screen.getByText("预计生成 4 张图片")).toBeTruthy();
+    expect(screen.getByText("将调用外部图片生成服务")).toBeTruthy();
+    expect(screen.queryByText(/secret-reviewed-hash|raw image prompt/)).toBeNull();
+    expect(screen.queryByText("此自动化始终允许")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "批准并生成" }));
+    expect(onResolve).toHaveBeenCalledWith("i1", "allow");
+    expect(screen.getByRole("button", { name: "拒绝" })).toBeTruthy();
   });
 
   it("parked approvals with tool data wear the §35 dress — same dialect as the live card", () => {

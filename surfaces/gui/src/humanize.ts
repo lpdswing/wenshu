@@ -15,6 +15,12 @@ export interface HumanLine {
 
 const trunc = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 const baseName = (p: string) => p.replace(/\/+$/, "").split("/").pop() || p;
+const articleLabel = (args: Record<string, unknown>): string => {
+  const title = typeof args.article_title === "string" ? args.article_title.trim() : "";
+  if (title) return title;
+  const path = typeof args.article_path === "string" ? args.article_path.trim() : "";
+  return path ? baseName(path) || "文章" : "文章";
+};
 const TODO_STATUS_LABELS: Record<string, string> = {
   pending: "待处理",
   in_progress: "进行中",
@@ -101,6 +107,10 @@ export function humanizeTool(name: string, args: any): HumanLine {
       return { pre: "Proposed a plan" };
     case "request_directory":
       return { pre: "Asked for folder access — ", obj: String(a.path ?? "") };
+    case "prepare_article_review":
+      return { pre: "生成了文章文字预览：", obj: articleLabel(a) };
+    case "generate_article_assets":
+      return { pre: "为文章生成封面与配图：", obj: articleLabel(a) };
     default: {
       const rest = trunc(shortArgs(a), 80);
       return { pre: `Used ${name}`, ...(rest ? { post: ` — ${rest}` } : {}) };
@@ -134,6 +144,10 @@ export function humanizeApprovalTitle(name: string, args: any): HumanLine {
       const { tail } = messageTarget(String(a.target ?? ""));
       return tail ? { pre: "发送文件至 ", obj: tail } : { pre: "发送文件" };
     }
+    case "prepare_article_review":
+      return { pre: "生成文章文字预览：", obj: articleLabel(a) };
+    case "generate_article_assets":
+      return { pre: "为文章生成封面与配图：", obj: articleLabel(a) };
     case "create_scheduled_task":
       return a.title
         ? { pre: "创建自动化 ", obj: `“${trunc(String(a.title), 60)}”` }
@@ -160,6 +174,10 @@ export function humanizeAsk(name: string, args: any): HumanLine {
       if (!tail) return { pre: "曾请求发送消息" };
       return { pre: "曾请求发送消息至 ", obj: tail, post: `（${platform}）` };
     }
+    case "prepare_article_review":
+      return { pre: "曾请求生成文章文字预览：", obj: articleLabel(a) };
+    case "generate_article_assets":
+      return { pre: "曾请求为文章生成封面与配图：", obj: articleLabel(a) };
     default:
       return { pre: `曾请求使用 ${name}` };
   }

@@ -16,6 +16,7 @@ import asyncio
 import json
 import inspect
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, AsyncIterator, Awaitable, Callable, Optional
@@ -41,6 +42,7 @@ class PermissionRequest:
     metadata: Any
     reason: str
     tool_call_id: Optional[str] = None  # for durable resume (idempotent inbox item)
+    display_arguments: Optional[dict[str, Any]] = None
 
 
 Approver = Callable[[PermissionRequest], Awaitable[ApprovalOutcome]]
@@ -524,6 +526,23 @@ class TurnEngine:
             metadata, "requires_approval", False
         )
 
+    @staticmethod
+    def _approval_display_arguments(
+        spec: Any,
+        arguments: dict[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        callback = getattr(spec, "approval_arguments", None)
+        if callback is None:
+            return None
+        try:
+            display_fields = callback(dict(arguments))
+            if not isinstance(display_fields, Mapping):
+                return None
+            return {**arguments, **dict(display_fields)}
+        except Exception:
+            return None
+
+
     async def _authorize(self, tool_call: ToolCall) -> "AsyncIterator[Event | bool]":
         """Permission flow for one call (TOOL_PROPOSED is emitted by the caller). Yields
         its events, then True/False (allowed) last. Denied/unknown calls get their
@@ -549,11 +568,19 @@ class TurnEngine:
             )
 
         if not allowed and decision.needs_user:
+            display_arguments = self._approval_display_arguments(
+                spec,
+                tool_call.arguments,
+            )
             yield Event(
                 EventType.PERMISSION_REQUIRED,
                 {
                     "name": tool_call.name,
-                    "arguments": tool_call.arguments,
+                    "arguments": (
+                        display_arguments
+                        if display_arguments is not None
+                        else tool_call.arguments
+                    ),
                     "reason": decision.reason,
                     "category": getattr(metadata, "category", ""),
                     # The exact target a standing rule could pin, or None when the call
@@ -576,11 +603,27 @@ class TurnEngine:
                         metadata=metadata,
                         reason=decision.reason,
                         tool_call_id=tool_call.id,
+                        display_arguments=display_arguments,
                     )
                 ),
                 interrupted=ApprovalOutcome.DENY,
             )
-            if outcome is ApprovalOutcome.DENY:
+            persistent_rejected = bool(
+                spec
+                and spec.approval_once_only
+                and outcome not in {ApprovalOutcome.ONCE, ApprovalOutcome.DENY}
+            )
+            if persistent_rejected:
+                allowed = False
+                reason = "persistent approval is not allowed for this tool"
+                self._audit(
+                    tool_call,
+                    stage="approval_resolved",
+                    status="denied",
+                    approval=outcome.value,
+                    reason=reason,
+                )
+            elif outcome is ApprovalOutcome.DENY:
                 allowed, reason = (
                     False,
                     "interrupted by user" if self._cancel.is_set() else "denied by user",

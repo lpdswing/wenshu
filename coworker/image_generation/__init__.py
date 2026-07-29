@@ -9,7 +9,7 @@ from .base import (
     ImageResult,
 )
 from .openai import DEFAULT_BASE_URL, DEFAULT_IMAGE_MODEL, OpenAIImageProvider
-from .registry import build_image_provider
+from .registry import build_image_provider, describe_image_provider
 from .tools import make_generate_image_tool
 
 __all__ = [
@@ -25,5 +25,6 @@ __all__ = [
     "ImageResult",
     "OpenAIImageProvider",
     "build_image_provider",
+    "describe_image_provider",
     "make_generate_image_tool",
 ]

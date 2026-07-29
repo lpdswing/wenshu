@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Transcript } from "./Transcript";
-import { humanizeTool } from "../humanize";
+import { humanizeApprovalTitle, humanizeAsk, humanizeTool } from "../humanize";
 import type { Item } from "../types";
 
 afterEach(cleanup);
@@ -215,5 +215,48 @@ describe("humanizeTool", () => {
   it("still renders pre-rename todo_write histories (legacy `items` key)", () => {
     const line = humanizeTool("todo_write", { items: [{ content: "Old plan", status: "pending" }] });
     expect(line.obj).toContain("Old plan");
+  });
+
+  it("uses narrow Chinese article templates with title and basename fallbacks", () => {
+    expect(
+      humanizeTool("prepare_article_review", { article_path: "drafts/review/article.md" }),
+    ).toEqual({
+      pre: "生成了文章文字预览：",
+      obj: "article.md",
+    });
+    expect(
+      humanizeTool("generate_article_assets", {
+        article_title: "文枢内容流水线",
+        article_path: "drafts/article.md",
+      }),
+    ).toEqual({
+      pre: "为文章生成封面与配图：",
+      obj: "文枢内容流水线",
+    });
+    expect(
+      humanizeApprovalTitle("prepare_article_review", { article_path: "drafts/review/article.md" }),
+    ).toEqual({
+      pre: "生成文章文字预览：",
+      obj: "article.md",
+    });
+    expect(
+      humanizeApprovalTitle("generate_article_assets", { article_path: "drafts/review/article.md" }),
+    ).toEqual({
+      pre: "为文章生成封面与配图：",
+      obj: "article.md",
+    });
+  });
+
+  it("describes declined article actions in natural Chinese without missing values", () => {
+    expect(
+      humanizeAsk("prepare_article_review", { article_path: "drafts/review/article.md" }),
+    ).toEqual({
+      pre: "曾请求生成文章文字预览：",
+      obj: "article.md",
+    });
+    expect(humanizeAsk("generate_article_assets", {})).toEqual({
+      pre: "曾请求为文章生成封面与配图：",
+      obj: "文章",
+    });
   });
 });

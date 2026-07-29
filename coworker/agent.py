@@ -35,6 +35,7 @@ from .product import ProductProfile, current_product
 from .image_generation import (
     ImageGenerationProvider,
     build_image_provider,
+    describe_image_provider,
     make_generate_image_tool,
 )
 from .secrets import SecretStore, state_dir
@@ -211,9 +212,13 @@ def build_engine(
                 if image_provider is not None
                 else lambda: build_image_provider(secrets)
             ),
+            image_provider_description=lambda: describe_image_provider(secrets),
         )
-        registry.register_all(
-            [content.prepare_article_review, content.generate_article_assets]
+        registry.register(content.prepare_article_review)
+        registry.register(
+            content.generate_article_assets,
+            approval_arguments=content.generate_article_assets_approval_arguments,
+            approval_once_only=True,
         )
     if agent.family == "knowledge" and any(root.writable for root in root_list):
         registry.register(

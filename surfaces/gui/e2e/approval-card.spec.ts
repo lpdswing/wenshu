@@ -6,6 +6,31 @@
 import { expect } from "@playwright/test";
 import { wenshuTest as test } from "./fixtures";
 
+test("article image generation → structured external approval with one-time controls", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const box = page.getByPlaceholder("告诉文枢你想完成什么...");
+  await box.fill("生成文章配图");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  const card = page.locator(".approval").filter({ hasText: "文枢内容流水线" }).last();
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("OpenAI · gpt-image-2");
+  await expect(card).toContainText("预计生成 4 张图片");
+  await expect(card).toContainText("将调用外部图片生成服务");
+  await expect(card).not.toContainText(/reviewed_hash|cover_request|illustration_plan|raw (?:cover|illustration) prompt/);
+  await expect(card.getByRole("button", { name: "批准并生成", exact: true })).toHaveCount(1);
+  await expect(card.getByRole("button", { name: "拒绝", exact: true })).toHaveCount(1);
+  await expect(card.getByRole("button", { name: "本次会话始终允许", exact: true })).toHaveCount(0);
+  await expect(card.getByRole("button", { name: "此自动化始终允许", exact: true })).toHaveCount(0);
+
+  await page.screenshot({ path: "test-results/wenshu-image-approval.png", fullPage: false });
+
+  await card.getByRole("button", { name: "批准并生成", exact: true }).click();
+  await expect(page.getByText("文章配图已生成。")).toBeVisible();
+});
+
 test("routine write → compact row: humanized title, inline preview, Allow resolves", async ({
   page,
 }) => {

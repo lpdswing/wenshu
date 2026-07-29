@@ -72,6 +72,9 @@ export function scopeNote(
   args: any,
   category?: string,
 ): { text: string; external: boolean } {
+  if (name === "generate_article_assets") {
+    return { text: "将调用外部图片生成服务", external: true };
+  }
   if (category === "connector") return { text: "将在已连接的服务上执行", external: true };
   if (EXTERNAL.has(name)) {
     const platform = String(args?.target ?? "").split(":")[0];
@@ -127,6 +130,45 @@ function MessagePreview({ text, label }: { text: string; label?: string }) {
   return <PreviewBlock text={text} mono={false} />;
 }
 
+export function ImageGenerationDetails({ args }: { args: unknown }) {
+  const providerValue =
+    args && typeof args === "object" && "provider" in args ? args.provider : undefined;
+  const modelValue =
+    args && typeof args === "object" && "model" in args ? args.model : undefined;
+  const totalValue =
+    args && typeof args === "object" && "total_images" in args ? args.total_images : undefined;
+  const provider =
+    typeof providerValue === "string" && providerValue.trim()
+      ? providerValue.trim()
+      : "外部图片服务";
+  const model =
+    typeof modelValue === "string" && modelValue.trim()
+      ? modelValue.trim()
+      : "模型待确认";
+  const total =
+    typeof totalValue === "number" && Number.isInteger(totalValue) && totalValue > 0
+      ? totalValue
+      : null;
+
+  return (
+    <dl
+      className="mt-3 space-y-2 rounded-lg border border-line bg-paper px-3 py-2.5"
+      data-testid="image-generation-details"
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <dt className="text-[11px] text-faint">图片服务</dt>
+        <dd className="text-[12px] font-medium text-ink">{provider} · {model}</dd>
+      </div>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <dt className="text-[11px] text-faint">生成数量</dt>
+        <dd className="text-[12px] text-muted">
+          {total === null ? "图片数量以本次生成计划为准" : `预计生成 ${total} 张图片`}
+        </dd>
+      </div>
+    </dl>
+  );
+}
+
 function Buttons({
   item,
   onApprove,
@@ -139,7 +181,8 @@ function Buttons({
   primaryLabel: string;
 }) {
   const connector = item.category === "connector";
-  const offerStanding = !!(runTask && item.standingTarget);
+  const oneShotOnly = item.name === "generate_article_assets";
+  const offerStanding = !oneShotOnly && !!(runTask && item.standingTarget);
   return (
     <div className="approval-btns">
       <button className="btn approval-primary" onClick={() => onApprove("once")}>
@@ -159,7 +202,7 @@ function Buttons({
           exactly the scope distinction §25 exists to draw. Same rule for run_shell:
           the command-scoped button below is the specific (safer) grant, so the
           tool-wide one stays out of the card. */}
-      {!connector && !offerStanding && item.name !== "run_shell" && (
+      {!oneShotOnly && !connector && !offerStanding && item.name !== "run_shell" && (
         <button
           className="btn"
           title={`本次会话始终允许${TOOL_VERBS[item.name] || item.name}`}
@@ -197,6 +240,7 @@ export function ApprovalCard({
   const [peek, setPeek] = useState(false);
   const title = humanizeApprovalTitle(item.name, item.args);
   const scope = scopeNote(item.name, item.args, item.category);
+  const imageGeneration = item.name === "generate_article_assets";
   const grants = item.name === "create_scheduled_task" ? permissionLines(item.args) : [];
   // "requires approval" is the engine's default boilerplate — only surface a real reason.
   const reason = item.reason && item.reason !== "requires approval" ? item.reason : "";
@@ -236,6 +280,10 @@ export function ApprovalCard({
         </div>
         <span className={"approval-scope" + (scope.external ? " out" : "")}>{scope.text}</span>
       </div>
+
+      {imageGeneration && (
+        <ImageGenerationDetails args={item.args} />
+      )}
 
       {/* Tool-shaped previews — the proposal, not an args dump. */}
       {item.name === "run_shell" && item.args?.command && (
@@ -278,7 +326,8 @@ export function ApprovalCard({
         </div>
       )}
       {/* Long-tail tools: no bespoke preview — fall back to the compact args line. */}
-      {!FILE_WRITES.has(item.name) &&
+      {!imageGeneration &&
+        !FILE_WRITES.has(item.name) &&
         !["run_shell", "send_message", "send_file"].includes(item.name) &&
         !grants.length &&
         shortArgs(item.args) && <div className="approval-rest">{shortArgs(item.args)}</div>}
@@ -287,7 +336,12 @@ export function ApprovalCard({
       {item.resolved ? (
         <div className="resolved">已处理：{DECISION_LABELS[item.resolved]}</div>
       ) : (
-        <Buttons item={item} onApprove={onApprove} runTask={runTask} primaryLabel="批准一次" />
+        <Buttons
+          item={item}
+          onApprove={onApprove}
+          runTask={runTask}
+          primaryLabel={imageGeneration ? "批准并生成" : "批准一次"}
+        />
       )}
     </div>
   );

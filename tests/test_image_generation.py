@@ -15,6 +15,7 @@ from coworker.image_generation import (
     ImageResponseError,
     OpenAIImageProvider,
     build_image_provider,
+    describe_image_provider,
 )
 
 
@@ -174,6 +175,33 @@ def test_registry_reads_non_sensitive_openai_profile() -> None:
     assert provider.model == "gpt-image-custom"
     assert provider.base_url == "https://proxy.example.test/v1"
     assert "sk-secret" not in repr(provider)
+
+
+def test_registry_describes_provider_without_constructing_it(monkeypatch) -> None:
+    from coworker.image_generation import registry as image_registry
+
+    class Secrets:
+        def get(self, key: str) -> dict[str, str]:
+            assert key == "provider:openai"
+            return {
+                "api_key": "sk-secret",
+                "base_url": "https://proxy.example.test/v1/",
+                "image_model": "gpt-image-custom",
+            }
+
+    monkeypatch.setattr(
+        image_registry,
+        "OpenAIImageProvider",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("provider must not be built for a description")
+        ),
+    )
+
+    description = describe_image_provider(Secrets())
+
+    assert description == {"provider": "OpenAI", "model": "gpt-image-custom"}
+    assert "sk-secret" not in repr(description)
+    assert "proxy.example.test" not in repr(description)
 
 
 def test_registry_requires_key_and_known_profile() -> None:

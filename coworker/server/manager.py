@@ -99,12 +99,20 @@ def _grants_of(engine) -> dict[str, Any]:
     return {"tools": tools, "commands": commands} if (tools or commands) else {}
 
 
+def _presented_arguments(request) -> dict[str, Any]:
+    display_arguments = getattr(request, "display_arguments", None)
+    if isinstance(display_arguments, dict):
+        return display_arguments
+    arguments = getattr(request, "arguments", None)
+    return arguments if isinstance(arguments, dict) else {}
+
+
 def _approval_body(request) -> str:
     """Approval card body: the tool's reason (if any) plus a compact preview of its args, so a
     mirrored 'Run `write_file`?' shows the path/content rather than just the tool name.
     """
     reason = (getattr(request, "reason", "") or "").strip()
-    preview = args_preview(getattr(request, "arguments", None))
+    preview = args_preview(_presented_arguments(request))
     return "\n".join(p for p in (reason, preview) if p)
 
 
@@ -2586,17 +2594,17 @@ class SessionManager:
 
     # -- automation (scheduled tasks) -------------------------------------------
     def approval_prompt_data(self, session_id: str, request) -> dict[str, Any]:
-        """Extra Inbox-item payload for a parked approval. Always carries the tool name +
-        arguments so the GUI can render the same humanized card (§35) it shows live —
-        without them a reopened session fell back to the raw 'Run `tool`?' treatment.
-        Automation runs additionally carry the owning task + (when the call is eligible)
-        the exact target a standing rule would pin: the GUI offers "Allow every time" only
-        when both are present — in-app only, never on Slack-mirrored buttons (§25)."""
+        """Extra Inbox-item payload for a parked approval.
+
+        The card receives display arguments when the host supplied them, while standing-rule
+        eligibility below always evaluates the original tool arguments. Automation runs also
+        carry their owning task and eligible standing target.
+        """
         from ..permissions import standing_rule_candidate
 
         data: dict[str, Any] = {
             "tool": request.tool_name,
-            "arguments": getattr(request, "arguments", None) or {},
+            "arguments": _presented_arguments(request),
         }
         task = self.task_store.task_for_run_session(session_id)
         if task is None:

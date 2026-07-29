@@ -8,6 +8,27 @@ from .base import ImageAuthError, ImageGenerationProvider
 from .openai import DEFAULT_BASE_URL, OpenAIImageProvider
 
 
+def _stored_profile(secrets: Any, profile: str) -> dict[str, Any]:
+    if profile != "openai":
+        raise ValueError(f"unsupported image provider: {profile}")
+    stored = secrets.get("provider:openai") or {}
+    return stored if isinstance(stored, dict) else {}
+
+
+def _image_model(stored: dict[str, Any]) -> str:
+    return normalize_openai_image_model(stored.get("image_model"))
+
+
+def describe_image_provider(
+    secrets: Any,
+    profile: str = "openai",
+) -> dict[str, str]:
+    """Return only approval-safe image provider metadata without building a provider."""
+
+    stored = _stored_profile(secrets, profile)
+    return {"provider": "OpenAI", "model": _image_model(stored)}
+
+
 def build_image_provider(
     secrets: Any,
     profile: str = "openai",
@@ -15,14 +36,10 @@ def build_image_provider(
     transport: Any = None,
 ) -> ImageGenerationProvider:
     """Build an image provider from one SecretStore profile without exposing its key."""
-    if profile != "openai":
-        raise ValueError(f"unsupported image provider: {profile}")
-    stored = secrets.get("provider:openai") or {}
-    if not isinstance(stored, dict):
-        stored = {}
+    stored = _stored_profile(secrets, profile)
     raw_key = stored.get("api_key") or os.environ.get("OPENAI_API_KEY", "")
     api_key = raw_key.strip() if isinstance(raw_key, str) else ""
-    model = normalize_openai_image_model(stored.get("image_model"))
+    model = _image_model(stored)
     raw_base_url = stored.get("base_url") or DEFAULT_BASE_URL
     base_url = raw_base_url.strip() if isinstance(raw_base_url, str) else DEFAULT_BASE_URL
     return OpenAIImageProvider(
@@ -33,4 +50,4 @@ def build_image_provider(
     )
 
 
-__all__ = ["build_image_provider"]
+__all__ = ["build_image_provider", "describe_image_provider"]

@@ -32,6 +32,8 @@ from .review import _BoundDirectory, bind_directory, prepare_article_review_file
 
 _MANIFEST_NAME = "assets.manifest.json"
 _MANIFEST_FIELDS = {"reviewed_hash", "plan_hash", "provider", "model", "assets"}
+_DEFAULT_IMAGE_PROVIDER_DISPLAY = "图像生成服务"
+_DEFAULT_IMAGE_MODEL_DISPLAY = "默认模型"
 
 _PREPARE_ARTICLE_REVIEW_SCHEMA: dict[str, Any] = {
     "type": "function",
@@ -165,6 +167,7 @@ class _AssetTarget:
 ImageProviderFactory = Callable[[], ImageGenerationProvider]
 ImageProviderSource = ImageGenerationProvider | ImageProviderFactory
 RootSource = Iterable[str | Path] | Callable[[], Iterable[str | Path]]
+ImageProviderDescription = Callable[[], Mapping[str, Any]]
 
 
 @dataclass
@@ -173,6 +176,10 @@ class ContentTools:
 
     roots: RootSource
     image_provider: ImageProviderSource = field(repr=False)
+    image_provider_description: ImageProviderDescription | None = field(
+        default=None,
+        repr=False,
+    )
     _resolved_provider: ImageGenerationProvider | None = field(
         default=None,
         init=False,
@@ -207,6 +214,49 @@ class ContentTools:
             "article_path": str(review.article_path),
             "preview_path": str(review.preview_path),
             "reviewed_hash": review.reviewed_hash,
+        }
+
+    def generate_article_assets_approval_arguments(
+        self,
+        arguments: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Summarize a paid asset request without writing or constructing its provider."""
+
+        plan = parse_asset_plan(
+            arguments.get("cover_request"),
+            arguments.get("illustration_plan"),
+        )
+        root_paths = self._root_paths()
+        resolved_article_path = resolve_in_roots(
+            arguments.get("article_path"),
+            root_paths,
+            must_exist=True,
+        )
+        with bind_directory(resolved_article_path.parent) as directory:
+            article_text = directory.read_text(resolved_article_path.name)
+        article = parse_article_text(resolved_article_path, article_text)
+
+        describe = self.image_provider_description
+        description = describe() if describe is not None else {}
+        if not isinstance(description, Mapping):
+            description = {}
+        provider = description.get("provider")
+        model = description.get("model")
+        provider_display = (
+            provider.strip()
+            if isinstance(provider, str) and provider.strip()
+            else _DEFAULT_IMAGE_PROVIDER_DISPLAY
+        )
+        model_display = (
+            model.strip()
+            if isinstance(model, str) and model.strip()
+            else _DEFAULT_IMAGE_MODEL_DISPLAY
+        )
+        return {
+            "article_title": article.meta.title,
+            "provider": provider_display,
+            "model": model_display,
+            "total_images": 1 + len(plan.illustrations),
         }
 
     async def generate_article_assets(
@@ -707,10 +757,16 @@ ContentTools.generate_article_assets.__aisuite_tool_metadata__ = ai.ToolMetadata
 def make_content_tools(
     roots: RootSource,
     image_provider: ImageProviderSource,
+    *,
+    image_provider_description: ImageProviderDescription | None = None,
 ) -> ContentTools:
     """Bind content tools to allowed roots and a direct or lazily built provider."""
 
-    return ContentTools(roots=roots, image_provider=image_provider)
+    return ContentTools(
+        roots=roots,
+        image_provider=image_provider,
+        image_provider_description=image_provider_description,
+    )
 
 
 __all__ = ["ContentTools", "ReviewChangedError", "make_content_tools"]

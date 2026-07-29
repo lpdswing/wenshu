@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import type { InboxItem } from "../api";
 import { humanizeApprovalTitle } from "../humanize";
-import { PreviewBlock, scopeNote, TitleText } from "./ApprovalCard";
+import { ImageGenerationDetails, PreviewBlock, scopeNote, TitleText } from "./ApprovalCard";
 
 // One Inbox item, rendered identically in the Inbox list and inline in its own session view
 // (answer-in-context). Resolving either place hits the same item id — first responder wins.
@@ -48,6 +48,8 @@ export function InboxItemCard({
   const options = item.options || [];
   const multi = !!item.multi;
   const allowText = item.allow_text !== false;
+  const imageGeneration =
+    item.kind === "approval" && item.data?.tool === "generate_article_assets";
 
   const textRow = (placeholder: string) => (
     <div className="flex items-center gap-2 mt-2.5">
@@ -95,7 +97,9 @@ export function InboxItemCard({
           <div className="text-[15px] font-semibold mt-0.5 leading-snug">{item.title}</div>
         </>
       )}
-      {item.kind === "approval" && item.data?.tool && typeof item.data.arguments?.content === "string" ? (
+      {imageGeneration ? (
+        <ImageGenerationDetails args={item.data?.arguments} />
+      ) : item.kind === "approval" && item.data?.tool && typeof item.data.arguments?.content === "string" ? (
         <PreviewBlock text={item.data.arguments.content} />
       ) : item.kind === "approval" && item.data?.tool && typeof item.data.arguments?.command === "string" ? (
         <PreviewBlock text={item.data.arguments.command} />
@@ -109,12 +113,12 @@ export function InboxItemCard({
             className={item.data?.tool ? BTN_ACCENT : BTN_PRIMARY}
             onClick={() => onResolve(item.id, "allow")}
           >
-            {item.data?.tool ? "批准一次" : "批准"}
+            {imageGeneration ? "批准并生成" : item.data?.tool ? "批准一次" : "批准"}
           </button>
           {/* Task-persistent standing grant (§25) — present only when the approval was
               raised inside an automation run AND the call can carry a tool+target rule.
               In-app only by construction: Slack mirrors render Approve/Deny buttons. */}
-          {item.data?.task_id && item.data?.standing_target && (
+          {!imageGeneration && item.data?.task_id && item.data?.standing_target && (
             <button
               className={BTN_BORDERED}
               title={`始终允许 ${item.data.standing_target} 用于“${item.data.task_title || "此自动化"}”；可随时在“自动化”页面撤销`}

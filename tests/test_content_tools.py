@@ -151,6 +151,83 @@ async def test_wrong_review_hash_rejects_before_lazy_provider_build(tmp_path: Pa
     assert spy.calls == []
 
 
+def test_approval_summary_is_read_only_and_does_not_build_provider(
+    tmp_path: Path,
+) -> None:
+    from coworker.content.tools import make_content_tools
+
+    built: list[bool] = []
+    described: list[bool] = []
+
+    def provider_factory():
+        built.append(True)
+        return SpyImageProvider()
+
+    def describe_provider():
+        described.append(True)
+        return {
+            "provider": "OpenAI",
+            "model": "gpt-image-2",
+            "api_key": "sk-must-not-leak",
+            "base_url": "https://secret.example.test",
+        }
+
+    article_path = write_article(tmp_path / "article.md")
+    tools = make_content_tools(
+        [tmp_path],
+        image_provider=provider_factory,
+        image_provider_description=describe_provider,
+    )
+    before = {path.name for path in tmp_path.iterdir()}
+
+    summary = tools.generate_article_assets_approval_arguments(
+        {
+            "article_path": str(article_path),
+            "reviewed_hash": "a" * 64,
+            "cover_request": VALID_COVER_REQUEST,
+            "illustration_plan": VALID_ILLUSTRATION_PLAN,
+        }
+    )
+
+    assert summary == {
+        "article_title": "文枢内容流水线",
+        "provider": "OpenAI",
+        "model": "gpt-image-2",
+        "total_images": 2,
+    }
+    assert built == []
+    assert described == [True]
+    assert {path.name for path in tmp_path.iterdir()} == before
+    assert "sk-must-not-leak" not in repr(summary)
+    assert "secret.example.test" not in repr(summary)
+
+
+def test_approval_summary_strictly_validates_plan_before_describing_provider(
+    tmp_path: Path,
+) -> None:
+    from coworker.content.tools import make_content_tools
+
+    described: list[bool] = []
+    article_path = write_article(tmp_path / "article.md")
+    tools = make_content_tools(
+        [tmp_path],
+        image_provider=lambda: SpyImageProvider(),
+        image_provider_description=lambda: described.append(True) or {},
+    )
+
+    with pytest.raises(AssetPlanError, match="unknown field"):
+        tools.generate_article_assets_approval_arguments(
+            {
+                "article_path": str(article_path),
+                "reviewed_hash": "a" * 64,
+                "cover_request": {**VALID_COVER_REQUEST, "api_key": "not allowed"},
+                "illustration_plan": VALID_ILLUSTRATION_PLAN,
+            }
+        )
+
+    assert described == []
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("cover", "illustrations"),

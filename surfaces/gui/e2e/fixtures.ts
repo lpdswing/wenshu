@@ -1,9 +1,24 @@
 import { test as base, expect, type Locator, type Page } from "@playwright/test";
-import type { ProductInfo } from "../src/api";
+import type { ArtifactInfo, ProductInfo } from "../src/api";
 
 // The app-wide /ws/events socket each page opened (UX-026 toast et al.) — specs
 // push server events through it via sendAppEvent below.
 const eventSockets = new WeakMap<Page, { send: (data: string) => void }>();
+
+export interface MockArtifact {
+  readonly path: string;
+  readonly kind: ArtifactInfo["kind"];
+  readonly content: string;
+  readonly name?: string;
+  readonly size?: number;
+  readonly modified_at?: number;
+}
+
+const artifactStores = new WeakMap<Page, readonly MockArtifact[]>();
+
+export function setMockArtifacts(page: Page, artifacts: readonly MockArtifact[]): void {
+  artifactStores.set(page, artifacts);
+}
 
 export const CORE_CHROME = {
   accountMenu: {
@@ -410,6 +425,7 @@ export async function mockApi(
   page: Page,
   product: ProductInfo = OPENWORKER_PRODUCT,
 ) {
+  if (!artifactStores.has(page)) artifactStores.set(page, []);
   const subscriptions: any[] = [
     // One existing subscription (a non-pinned session) so the Slack page's per-workspace
     // "Listening" row has an entry. Relay-mode channels are team-qualified (slack:T…/C…).
@@ -661,6 +677,40 @@ export async function mockApi(
             attachment.kind === "image",
         );
         send("turn_start", { input: msg.text });
+        if (/生成文章配图/.test(msg.text)) {
+          pendingTool = "generate_article_assets";
+          const toolArgs = {
+            article_path: "drafts/article.md",
+            reviewed_hash: "a".repeat(64),
+            cover_request: {
+              subject: "文枢内容流水线",
+              prompt: "raw cover prompt",
+              aspect_ratio: "2:1",
+            },
+            illustration_plan: [
+              { section: "第一节", prompt: "raw illustration prompt 1" },
+              { section: "第二节", prompt: "raw illustration prompt 2" },
+              { section: "第三节", prompt: "raw illustration prompt 3" },
+            ],
+          };
+          send("tool_proposed", {
+            name: "generate_article_assets",
+            arguments: toolArgs,
+          });
+          send("permission_required", {
+            name: "generate_article_assets",
+            arguments: {
+              ...toolArgs,
+              article_title: "文枢内容流水线",
+              provider: "OpenAI",
+              model: "gpt-image-2",
+              total_images: 4,
+            },
+            reason: "",
+            category: "content-generation",
+          });
+          return;
+        }
         if (/(?:run a tool|运行一个工具)/i.test(msg.text)) {
           pendingTool = "run_shell";
           send("tool_proposed", { name: "run_shell", arguments: { command: "ls" } });
@@ -787,7 +837,19 @@ export async function mockApi(
         send("assistant_message", { text: `Echo: ${msg.text} [model=${msg.model || "none"}]` });
         send("turn_done");
       } else if (msg.type === "approval") {
-        if (pendingTool === "run_shell") {
+        if (pendingTool === "generate_article_assets") {
+          if (msg.decision === "deny") {
+            send("tool_finished", { name: pendingTool, status: "denied" });
+            send("assistant_message", { text: "已取消生成文章配图。" });
+          } else {
+            send("tool_finished", {
+              name: pendingTool,
+              status: "done",
+              result_preview: "已生成 4 张图片",
+            });
+            send("assistant_message", { text: "文章配图已生成。" });
+          }
+        } else if (pendingTool === "run_shell") {
           if (msg.decision === "deny") {
             send("tool_finished", { name: "run_shell", status: "denied" });
             send("assistant_message", { text: "Understood — skipped the command." });
@@ -866,6 +928,35 @@ export async function mockApi(
         return json({ ok: true, roots });
       }
       return json({ roots });
+    }
+    if (/\/v1\/sessions\/[^/]+\/artifacts\/read$/.test(p) && m === "GET") {
+      const artifactPath = new URL(req.url()).searchParams.get("path") || "";
+      const artifact = (artifactStores.get(page) || []).find(
+        (candidate) => candidate.path === artifactPath,
+      );
+      if (!artifact) {
+        return json(
+          { ok: false, error: "未找到交付物。", path: artifactPath, kind: "text" },
+          404,
+        );
+      }
+      return json({
+        ok: true,
+        path: artifact.path,
+        kind: artifact.kind,
+        content: artifact.content,
+      });
+    }
+    if (/\/v1\/sessions\/[^/]+\/artifacts$/.test(p) && m === "GET") {
+      return json({
+        artifacts: (artifactStores.get(page) || []).map((artifact) => ({
+          path: artifact.path,
+          name: artifact.name || baseName(artifact.path),
+          kind: artifact.kind,
+          size: artifact.size ?? artifact.content.length,
+          modified_at: artifact.modified_at ?? 0,
+        })),
+      });
     }
     if (/\/v1\/sessions\/[^/]+\/messages$/.test(p)) return json({ messages: [] });
     if (/\/v1\/sessions\/[^/]+\/unattended$/.test(p)) {
