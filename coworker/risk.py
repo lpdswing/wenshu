@@ -29,6 +29,8 @@ SHELL_TOOL = "run_shell"
 _BASE: dict[str, RiskClass] = {
     **{name: RiskClass.WRITE_LOCAL for name in WRITE_TOOLS},
     SHELL_TOOL: RiskClass.EXEC,
+    "prepare_article_review": RiskClass.WRITE_LOCAL,
+    "generate_article_assets": RiskClass.EXTERNAL,
 }
 
 # A user-local override resolver: tool name -> RiskClass (or None to defer to the base).

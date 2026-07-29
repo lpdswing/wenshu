@@ -26,6 +26,8 @@ PLAIN_META = SimpleNamespace(requires_approval=False)
         ("apply_patch", None, RiskClass.WRITE_LOCAL),
         ("apply_unified_diff", None, RiskClass.WRITE_LOCAL),
         ("run_shell", None, RiskClass.EXEC),
+        ("prepare_article_review", EXTERNAL_META, RiskClass.WRITE_LOCAL),
+        ("generate_article_assets", PLAIN_META, RiskClass.EXTERNAL),
         ("read_file", None, RiskClass.READ),
         ("grep", None, RiskClass.READ),
         ("git_log", None, RiskClass.READ),
@@ -84,6 +86,23 @@ def test_external_asks_in_interactive_allows_in_auto(tmp_path):
     auto = PermissionEngine(workspace_root=tmp_path, mode=Mode.AUTO)
     d = auto.evaluate("send_message", {"text": "hi"}, EXTERNAL_META)
     assert d.allowed
+
+
+def test_content_generation_permissions_follow_declared_risk(tmp_path):
+    interactive = PermissionEngine(workspace_root=tmp_path)
+    prepare = interactive.evaluate(
+        "prepare_article_review",
+        {"article_path": str(tmp_path / "article.md")},
+        EXTERNAL_META,
+    )
+    generate = interactive.evaluate(
+        "generate_article_assets",
+        {"article_path": str(tmp_path / "article.md")},
+        PLAIN_META,
+    )
+
+    assert not prepare.allowed and prepare.needs_user
+    assert not generate.allowed and generate.needs_user
 
 
 def test_write_local_path_scoped(tmp_path):

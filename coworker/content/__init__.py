@@ -11,6 +11,7 @@ from .images import (
 from .models import ArticleDocument, ArticleFrontmatter, ImageAsset
 from .paths import ContentPathError, resolve_in_roots
 from .review import ArticleReview, prepare_article_review_file
+from .tools import ContentTools, ReviewChangedError, make_content_tools
 
 __all__ = [
     "AssetManifest",
@@ -19,14 +20,17 @@ __all__ = [
     "ArticleFrontmatter",
     "ArticleReview",
     "ArticleValidationError",
+    "ContentTools",
     "ContentPathError",
     "CoverRequest",
     "ImageAsset",
     "IllustrationPlan",
+    "ReviewChangedError",
     "IllustrationRequest",
     "article_text_hash",
     "prepare_article_review_file",
     "parse_asset_plan",
+    "make_content_tools",
     "resolve_in_roots",
     "load_article",
 ]
