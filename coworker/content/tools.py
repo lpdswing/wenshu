@@ -363,6 +363,7 @@ def _resolve_asset_targets(
 
     for item in requests:
         logical_path = article_directory.joinpath(*PurePosixPath(item.output_path).parts)
+        _validate_logical_output_location(article_directory, item.output_path)
         resolved_path = resolve_in_roots(logical_path, roots, must_exist=False)
         if not resolved_path.is_relative_to(article_directory):
             raise ValueError(
@@ -385,6 +386,35 @@ def _resolve_asset_targets(
         )
 
     return tuple(targets)
+
+
+def _validate_logical_output_location(
+    article_directory: Path,
+    output_path: str,
+) -> None:
+    parts = PurePosixPath(output_path).parts
+    current = article_directory
+    for index, part in enumerate(parts):
+        current = current / part
+        try:
+            status = current.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise ValueError(
+                f"asset output path could not be inspected: {output_path}"
+            ) from exc
+        if stat.S_ISLNK(status.st_mode):
+            raise ValueError(
+                f"asset output path must not contain a symbolic link: {output_path}"
+            )
+        if index < len(parts) - 1:
+            if not stat.S_ISDIR(status.st_mode):
+                raise ValueError(
+                    f"asset output parent is not a directory: {output_path}"
+                )
+        elif not stat.S_ISREG(status.st_mode):
+            raise ValueError(f"asset output is not a regular file: {output_path}")
 
 
 def _validate_output_file_location(path: Path, output_path: str) -> None:

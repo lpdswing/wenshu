@@ -136,6 +136,19 @@ def test_resolve_in_roots_rejects_symlink_parent_escape(tmp_path: Path) -> None:
         resolve_in_roots(linked_parent / outside_article.name, [tmp_path], must_exist=True)
 
 
+def test_review_fails_closed_without_directory_binding_support(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if os.name == "nt":
+        pytest.skip("Windows uses its native directory-handle binding")
+    article_path = write_article(tmp_path / "article.md")
+    monkeypatch.setattr(review_module, "_HAS_POSIX_DIR_FD", False)
+
+    with pytest.raises(ContentPathError, match="secure content directory binding"):
+        prepare_article_review_file(article_path, [tmp_path])
+
+
 def test_review_renders_complete_text_without_images_or_remote_resources(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

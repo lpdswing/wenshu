@@ -403,20 +403,9 @@ class _BoundDirectory:
                 self.expected,
             )
         else:
-            try:
-                status = self.path.stat(follow_symlinks=False)
-            except OSError as exc:
-                raise ContentPathError(
-                    f"content directory changed after validation: {self.path}"
-                ) from exc
-            if not stat.S_ISDIR(status.st_mode) or not _matches_identity(
-                status,
-                self.expected,
-            ):
-                raise ContentPathError(
-                    f"content directory changed after validation: {self.path}"
-                )
-            self.bound_path = self.path
+            raise ContentPathError(
+                "secure content directory binding is unavailable on this platform"
+            )
         return self
 
     def __exit__(
@@ -525,23 +514,6 @@ class _BoundDirectory:
                     _close_windows_directory(handle)
             return
 
-        if self.bound_path is None:
-            raise RuntimeError("content directory must be entered before use")
-        current_path = self.bound_path
-        checks: list[tuple[Path, _PathIdentity]] = [
-            (current_path, self.expected)
-        ]
-        for part in parts:
-            current_path = current_path / part
-            expected = _ensure_child_directory(current_path, create=create)
-            checks.append((current_path, expected))
-        parent = _BoundParent(
-            dir_fd=None,
-            path=current_path,
-            checks=tuple(checks),
-        )
-        parent.validate()
-        yield parent
 
     @contextmanager
     def open_binary(

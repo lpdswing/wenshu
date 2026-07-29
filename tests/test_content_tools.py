@@ -208,7 +208,7 @@ async def test_existing_symlink_output_escape_rejects_before_provider_call(
     article_path = write_article(tmp_path / "article.md")
     review = tools.prepare_article_review(str(article_path))
 
-    with pytest.raises(ValueError, match="outside"):
+    with pytest.raises(ValueError, match="symbolic link"):
         await tools.generate_article_assets(
             str(article_path),
             review["reviewed_hash"],
@@ -217,6 +217,30 @@ async def test_existing_symlink_output_escape_rejects_before_provider_call(
         )
 
     assert spy.calls == []
+
+
+@pytest.mark.asyncio
+async def test_existing_in_tree_symlink_parent_rejects_before_provider_call(
+    tmp_path: Path,
+) -> None:
+    real_images = tmp_path / "real-images"
+    real_images.mkdir()
+    (tmp_path / "images").symlink_to(real_images, target_is_directory=True)
+    spy = SpyImageProvider()
+    tools = make_tools(tmp_path, spy)
+    article_path = write_article(tmp_path / "article.md")
+    review = tools.prepare_article_review(str(article_path))
+
+    with pytest.raises(ValueError, match="symbolic link"):
+        await tools.generate_article_assets(
+            str(article_path),
+            review["reviewed_hash"],
+            VALID_COVER_REQUEST,
+            VALID_ILLUSTRATION_PLAN,
+        )
+
+    assert spy.calls == []
+    assert list(real_images.iterdir()) == []
 
 
 @pytest.mark.asyncio
