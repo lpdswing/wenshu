@@ -48,6 +48,11 @@ class ScriptedProvider(ProviderClient):
         return ModelCapabilities()
 
 
+class StubImageProvider:
+    async def generate(self, request):
+        raise AssertionError(f"image provider must not run during registration: {request}")
+
+
 def _engine(tmp_path, turns, *, approver=None, loop=False, max_iterations=12):
     provider = ScriptedProvider(turns, loop=loop)
     registry = ToolRegistry()
@@ -525,6 +530,71 @@ def test_generate_image_tool_observes_engine_root_revocation(tmp_path):
             engine.registry.execute(
                 "generate_image",
                 {"prompt": "图", "output_path": str(extra / "cover.png")},
+            )
+    finally:
+        engine.executor.close()
+
+def test_native_content_tools_are_scoped_to_wenshu_cowork(tmp_path):
+    from coworker.agent import build_engine
+    from coworker.agents import code_agent, cowork_agent
+    from coworker.secrets import SecretStore
+
+    secrets = SecretStore(tmp_path / "secrets.json")
+    cowork = build_engine(
+        agent=cowork_agent(),
+        workspace=tmp_path,
+        provider=ScriptedProvider([]),
+        secrets=secrets,
+        image_provider=StubImageProvider(),
+    )
+    code = build_engine(
+        agent=code_agent(),
+        workspace=tmp_path,
+        provider=ScriptedProvider([]),
+        secrets=secrets,
+        image_provider=StubImageProvider(),
+    )
+    content_tools = {"prepare_article_review", "generate_article_assets"}
+    try:
+        assert content_tools <= set(cowork.registry.names())
+        assert content_tools.isdisjoint(code.registry.names())
+    finally:
+        cowork.executor.close()
+        code.executor.close()
+
+
+def test_content_tools_observe_engine_root_revocation(tmp_path):
+    from coworker.agent import build_engine
+    from coworker.agents import cowork_agent
+    from coworker.content.paths import ContentPathError
+    from coworker.roots import RootDir
+    from coworker.secrets import SecretStore
+
+    primary = tmp_path / "primary"
+    extra = tmp_path / "extra"
+    primary.mkdir()
+    extra.mkdir()
+    article = extra / "article.md"
+    article.write_text("---\ntitle: 动态目录\n---\n正文\n", encoding="utf-8")
+    engine = build_engine(
+        agent=cowork_agent(),
+        workspace=primary,
+        roots=[
+            RootDir(path=primary, writable=True),
+            RootDir(path=extra, writable=True),
+        ],
+        provider=ScriptedProvider([]),
+        secrets=SecretStore(tmp_path / "secrets.json"),
+        image_provider=StubImageProvider(),
+    )
+    try:
+        engine.roots[:] = [
+            root for root in engine.roots if root.path != extra.resolve()
+        ]
+        with pytest.raises(ContentPathError):
+            engine.registry.execute(
+                "prepare_article_review",
+                {"article_path": str(article)},
             )
     finally:
         engine.executor.close()

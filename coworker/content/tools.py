@@ -164,13 +164,14 @@ class _AssetTarget:
 
 ImageProviderFactory = Callable[[], ImageGenerationProvider]
 ImageProviderSource = ImageGenerationProvider | ImageProviderFactory
+RootSource = Iterable[str | Path] | Callable[[], Iterable[str | Path]]
 
 
 @dataclass
 class ContentTools:
     """Article review and hash-gated image tools bound to roots and a provider source."""
 
-    roots: tuple[Path, ...]
+    roots: RootSource
     image_provider: ImageProviderSource = field(repr=False)
     _resolved_provider: ImageGenerationProvider | None = field(
         default=None,
@@ -184,11 +185,9 @@ class ContentTools:
     )
 
     def __post_init__(self) -> None:
-        self.roots = tuple(
-            Path(root).expanduser().resolve(strict=False) for root in self.roots
-        )
-        if not self.roots:
-            raise ContentPathError("at least one content root is required")
+        if not callable(self.roots) and not isinstance(self.roots, (list, tuple)):
+            self.roots = tuple(self.roots)
+        self._root_paths()
 
         source = self.image_provider
         if not isinstance(source, type) and callable(getattr(source, "generate", None)):
@@ -201,7 +200,7 @@ class ContentTools:
     def prepare_article_review(self, article_path: str) -> dict[str, str]:
         """Create a safe text review and return its article-bound hash."""
 
-        review = prepare_article_review_file(article_path, self.roots)
+        review = prepare_article_review_file(article_path, self._root_paths())
         return {
             "title": review.title,
             "summary": review.summary,
@@ -219,9 +218,10 @@ class ContentTools:
     ) -> dict[str, Any]:
         """Generate a validated article asset plan only for unchanged reviewed text."""
 
+        root_paths = self._root_paths()
         resolved_article_path = resolve_in_roots(
             article_path,
-            self.roots,
+            root_paths,
             must_exist=True,
         )
         article_directory = resolved_article_path.parent
@@ -242,8 +242,8 @@ class ContentTools:
 
             plan = parse_asset_plan(cover_request, illustration_plan)
             plan_hash = _asset_plan_hash(plan)
-            targets = _resolve_asset_targets(plan, article_directory, self.roots)
-            _validate_manifest_path(article_directory, self.roots)
+            targets = _resolve_asset_targets(plan, article_directory, root_paths)
+            _validate_manifest_path(article_directory, root_paths)
             manifest = _load_manifest(directory)
             if manifest is not None and _manifest_is_reusable(
                 manifest,
@@ -326,6 +326,16 @@ class ContentTools:
             )
             _atomic_write_manifest(directory, manifest)
             return _completed_result(manifest, reused=False)
+
+    def _root_paths(self) -> tuple[Path, ...]:
+        source = self.roots() if callable(self.roots) else self.roots
+        roots = tuple(
+            Path(root).expanduser().resolve(strict=False) for root in source
+        )
+        if not roots:
+            raise ContentPathError("at least one content root is required")
+        return roots
+
 
     def _get_image_provider(self) -> ImageGenerationProvider:
         provider = self._resolved_provider
@@ -695,15 +705,12 @@ ContentTools.generate_article_assets.__aisuite_tool_metadata__ = ai.ToolMetadata
 
 
 def make_content_tools(
-    roots: Iterable[str | Path],
+    roots: RootSource,
     image_provider: ImageProviderSource,
 ) -> ContentTools:
     """Bind content tools to allowed roots and a direct or lazily built provider."""
 
-    return ContentTools(
-        roots=tuple(Path(root) for root in roots),
-        image_provider=image_provider,
-    )
+    return ContentTools(roots=roots, image_provider=image_provider)
 
 
 __all__ = ["ContentTools", "ReviewChangedError", "make_content_tools"]

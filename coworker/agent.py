@@ -13,6 +13,7 @@ from .agents import Agent, AgentContext, code_agent
 from .automation import scheduling_tools
 from .selfwake import selfwake_tools
 from .subscriptions import subscription_tools
+from .content import make_content_tools
 from .config import load_config
 from .connectors import (
     connector_list,
@@ -31,7 +32,11 @@ from .roots import RootDir, normalize_roots, render_context
 from .providers import ProviderClient, ProviderRouter
 from .overrides import RiskOverrideStore
 from .product import ProductProfile, current_product
-from .image_generation import make_generate_image_tool
+from .image_generation import (
+    ImageGenerationProvider,
+    build_image_provider,
+    make_generate_image_tool,
+)
 from .secrets import SecretStore, state_dir
 from .skills import SkillLoader, skill_catalog_text, skill_tools
 from .tools import ToolRegistry
@@ -148,6 +153,7 @@ def build_engine(
     messages: Optional[list[dict[str, Any]]] = None,
     extra_tools: Optional[list[Any]] = None,
     secrets: Optional[SecretStore] = None,
+    image_provider: Optional[ImageGenerationProvider] = None,
     product: ProductProfile | None = None,
     task_store: Optional[Any] = None,
     wake_store: Optional[Any] = None,
@@ -197,6 +203,18 @@ def build_engine(
     # Messaging personas (Cowork / Ops / MyHelper) expose send_message; MyHelper also uses it as
     # the reply path for inbound Telegram/Slack super-agent sessions.
     secrets = secrets or SecretStore()
+    if agent.content_tools and any(root.writable for root in root_list):
+        content = make_content_tools(
+            roots=lambda: (root.path for root in root_list if root.writable),
+            image_provider=(
+                image_provider
+                if image_provider is not None
+                else lambda: build_image_provider(secrets)
+            ),
+        )
+        registry.register_all(
+            [content.prepare_article_review, content.generate_article_assets]
+        )
     if agent.family == "knowledge" and any(root.writable for root in root_list):
         registry.register(
             make_generate_image_tool(

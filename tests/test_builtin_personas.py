@@ -32,8 +32,8 @@ def test_cowork_persona_matches_builder(tmp_path):
     reg = PersonaRegistry()
     ctx = _ctx(tmp_path)
     assert _names(reg.agent("cowork"), ctx) == _names(cowork_agent(), ctx)
-    a = reg.agent("cowork")
-    assert a.messaging and a.connectors
+    agent = reg.agent("cowork")
+    assert agent.messaging and agent.connectors and agent.content_tools
 
 
 def test_default_persona_is_wenshu_content_assistant(tmp_path):
@@ -46,11 +46,12 @@ def test_default_persona_is_wenshu_content_assistant(tmp_path):
     assert row["tagline"] == "整理资料、撰写文章并交付内容成果"
     assert "资料" in agent.system_prompt
     assert "公众号" in agent.system_prompt
-    # Future content/image/WeChat functions are intentionally described as a workflow, not
-    # advertised as concrete snake_case tools before those tools exist.
+    assert "prepare_article_review" in agent.system_prompt
+    assert "generate_article_assets" in agent.system_prompt
+    assert "reviewed_hash" in agent.system_prompt
     assert not any(
         token in agent.system_prompt
-        for token in ("write_article", "generate_image", "create_wechat_draft")
+        for token in ("write_article", "create_wechat_draft")
     )
 
 
@@ -61,6 +62,7 @@ def test_ops_persona_composes_knowledge_toolset(tmp_path):
     assert _names(reg.agent("ops"), ctx) == _names(cowork_agent(), ctx)
     a = reg.agent("ops")
     assert a.family == "knowledge" and a.messaging and a.connectors
+    assert not a.content_tools
     assert "read_file_lines" in _names(a, ctx)  # multi-root knowledge files
 
 
