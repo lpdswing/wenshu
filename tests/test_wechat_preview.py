@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,7 @@ from coworker.connectors.wechat import (
     RenderedArticle,
     prepare_preview,
 )
+import coworker.connectors.wechat.preview as preview_module
 from coworker.content import article_text_hash, load_article
 
 
@@ -99,6 +101,48 @@ def _refresh_manifest(arguments: dict[str, object]) -> None:
     for asset in manifest["assets"]:
         asset["sha256"] = _sha256(article_path.parent / asset["output_path"])
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+
+class _ReplacingStream(io.BytesIO):
+    def __init__(self, initial: bytes, replacement: bytes) -> None:
+        super().__init__(initial)
+        self._replacement = replacement
+        self._replace_on_seek = False
+
+    def read(self, size: int = -1) -> bytes:
+        data = super().read(size)
+        if not data and self.tell() > 0:
+            self._replace_on_seek = True
+        return data
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        if self._replace_on_seek and offset == 0 and whence == 0:
+            self._replace_on_seek = False
+            super().seek(0)
+            self.truncate()
+            super().write(self._replacement)
+        return super().seek(offset, whence)
+
+
+def _png_bytes(color: tuple[int, int, int]) -> bytes:
+    output = io.BytesIO()
+    Image.new("RGB", (3, 2), color).save(output, format="PNG")
+    return output.getvalue()
+
+
+def test_preview_hash_and_embedded_data_share_one_image_snapshot() -> None:
+    approved = _png_bytes((20, 180, 80))
+    replacement = _png_bytes((220, 20, 60))
+    source = _ReplacingStream(approved, replacement)
+    asset = preview_module._ManifestAsset(
+        path="images/body.png",
+        sha256=hashlib.sha256(approved).hexdigest(),
+    )
+
+    validated = preview_module._validate_image(source, asset, retain_data=True)
+
+    assert validated.image.sha256 == hashlib.sha256(approved).hexdigest()
+    assert validated.data == approved
 
 
 @pytest.mark.parametrize(

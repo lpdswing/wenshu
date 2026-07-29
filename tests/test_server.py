@@ -208,6 +208,15 @@ def test_wechat_connect_and_settings_are_secret_safe_and_normalized(
     assert "must-not-leak" not in listing_response.text
     assert "ACCESS" not in listing_response.text
 
+    account_route = client.post(
+        "/v1/connectors/wechat_official/accounts/default/default"
+    )
+    assert account_route.json() == {
+        "ok": False,
+        "error": "not a multi-account connector",
+    }
+    assert manager.secrets.get("wechat_official:default") == stored
+
 
 @pytest.mark.parametrize(
     "body",

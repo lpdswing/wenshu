@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import html
 import json
+import io
 import os
 import warnings
 from collections.abc import Iterable, Mapping
@@ -186,11 +187,6 @@ def _load_manifest(directory: _BoundDirectory) -> tuple[str, tuple[_ManifestAsse
     return reviewed_hash, tuple(assets)
 
 
-def _stream_sha256(source: BinaryIO) -> str:
-    digest = hashlib.sha256()
-    for chunk in iter(lambda: source.read(1024 * 1024), b""):
-        digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _validate_image(
@@ -199,21 +195,21 @@ def _validate_image(
     *,
     retain_data: bool,
 ) -> _ValidatedAsset:
-    source.seek(0, os.SEEK_END)
-    size = source.tell()
+    source.seek(0)
+    payload = source.read(_MAX_IMAGE_BYTES + 1)
+    size = len(payload)
     if size <= 0 or size > _MAX_IMAGE_BYTES:
         raise PreviewValidationError(f"image has an invalid size: {asset.path}")
-    source.seek(0)
 
-    actual_hash = _stream_sha256(source)
+    actual_hash = hashlib.sha256(payload).hexdigest()
     if not hmac.compare_digest(actual_hash, asset.sha256):
         raise PreviewValidationError(f"image sha256 does not match manifest: {asset.path}")
 
     try:
-        source.seek(0)
+        image_source = io.BytesIO(payload)
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
-            with Image.open(source) as candidate:
+            with Image.open(image_source) as candidate:
                 image_format = candidate.format
                 width, height = candidate.size
                 if image_format not in _IMAGE_FORMATS:
@@ -232,8 +228,8 @@ def _validate_image(
                     )
                 candidate.verify()
 
-            source.seek(0)
-            with Image.open(source) as decoded:
+            image_source.seek(0)
+            with Image.open(image_source) as decoded:
                 decoded.load()
     except PreviewValidationError:
         raise
@@ -253,10 +249,7 @@ def _validate_image(
             f"image filename does not match its decoded type: {asset.path}"
         )
 
-    data: bytes | None = None
-    if retain_data:
-        source.seek(0)
-        data = source.read()
+    data = payload if retain_data else None
     return _ValidatedAsset(
         image=PreviewImage(
             path=asset.path,
