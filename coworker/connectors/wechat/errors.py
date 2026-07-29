@@ -17,6 +17,7 @@ _TOKENISH_RE = re.compile(r"(?<![\w])(?=[A-Za-z0-9._~-]{20,}(?![\w]))(?=[^\s]*\d
 
 _KNOWN_ERRORS: dict[int, tuple[WeChatErrorKind, str]] = {
     40013: ("invalid_credentials", "微信公众号凭据无效"),
+    40125: ("invalid_credentials", "微信公众号凭据无效"),
     40164: ("ip_allowlist", "当前网络地址不在微信公众号白名单中"),
     48001: ("permission_denied", "微信公众号接口权限不足"),
     45009: ("rate_limited", "微信公众号接口调用过于频繁"),

@@ -219,6 +219,8 @@ def test_emits_relative_image_placeholders_and_stable_deduplicated_refs() -> Non
         "![](../image.png)",
         "![](images/../image.png)",
         "![](%2e%2e/image.png)",
+        "![](images/%00cover.png)",
+        "![](images/%0Acover.png)",
     ],
 )
 def test_rejects_missing_remote_absolute_and_traversing_image_paths(

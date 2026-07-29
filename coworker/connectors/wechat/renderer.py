@@ -241,6 +241,8 @@ def _portable_image_path(value: str | None) -> str:
         raise ValueError("image path must be local and article-relative")
 
     decoded = unquote(value)
+    if any(ord(character) < 0x20 for character in decoded):
+        raise ValueError("image path must be portable")
     if unquote(decoded) != decoded:
         raise ValueError("image path must not contain nested URL encoding")
     if "\\" in decoded or any(character in '<>:"|?*' for character in decoded):

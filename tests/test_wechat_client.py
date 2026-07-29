@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable
 
 import httpx
@@ -108,6 +111,34 @@ def test_token_is_cached_and_request_uses_the_documented_get_parameters():
         "appid": APP_ID,
         "secret": APP_SECRET,
     }
+
+
+def test_concurrent_token_requests_share_one_refresh():
+    workers = 6
+    start = threading.Barrier(workers)
+    call_lock = threading.Lock()
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        with call_lock:
+            calls += 1
+        time.sleep(0.05)
+        return _token_response()
+
+    def get_token(_index: int) -> str:
+        start.wait()
+        return client.get_access_token()
+
+    client = _client(handler)
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            tokens = list(executor.map(get_token, range(workers)))
+    finally:
+        client.close()
+
+    assert tokens == [ACCESS_TOKEN] * workers
+    assert calls == 1
 
 
 def test_httpx_request_logs_redact_wechat_queries(caplog):
@@ -254,6 +285,7 @@ def test_request_json_rejects_absolute_urls_before_fetching_a_token():
     ("errcode", "kind"),
     [
         (40013, "invalid_credentials"),
+        (40125, "invalid_credentials"),
         (40164, "ip_allowlist"),
         (48001, "permission_denied"),
         (45009, "rate_limited"),

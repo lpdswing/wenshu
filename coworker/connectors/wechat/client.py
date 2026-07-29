@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -69,6 +70,7 @@ class WeChatClient:
         self._credentials = credentials
         self._clock = clock
         self._tokens: dict[str, _CachedToken] = {}
+        self._token_lock = threading.Lock()
         self._http = httpx.Client(
             base_url=_BASE_URL,
             transport=transport,
@@ -111,37 +113,38 @@ class WeChatClient:
 
     def get_access_token(self) -> str:
         app_id = self._credentials.app_id
-        cached = self._tokens.get(app_id)
-        now = self._clock()
-        if cached is not None and now < cached.expires_at - _TOKEN_REFRESH_MARGIN:
-            return cached.value
+        with self._token_lock:
+            cached = self._tokens.get(app_id)
+            now = self._clock()
+            if cached is not None and now < cached.expires_at - _TOKEN_REFRESH_MARGIN:
+                return cached.value
 
-        payload = self._request_object(
-            "GET",
-            "/cgi-bin/token",
-            params={
-                "grant_type": "client_credential",
-                "appid": app_id,
-                "secret": self._credentials.app_secret,
-            },
-            sensitive_values=(app_id, self._credentials.app_secret),
-        )
-        token = payload.get("access_token")
-        expires_in = payload.get("expires_in")
-        if (
-            not isinstance(token, str)
-            or not token
-            or isinstance(expires_in, bool)
-            or not isinstance(expires_in, (int, float))
-            or expires_in <= 0
-        ):
-            raise WeChatResponseError()
+            payload = self._request_object(
+                "GET",
+                "/cgi-bin/token",
+                params={
+                    "grant_type": "client_credential",
+                    "appid": app_id,
+                    "secret": self._credentials.app_secret,
+                },
+                sensitive_values=(app_id, self._credentials.app_secret),
+            )
+            token = payload.get("access_token")
+            expires_in = payload.get("expires_in")
+            if (
+                not isinstance(token, str)
+                or not token
+                or isinstance(expires_in, bool)
+                or not isinstance(expires_in, (int, float))
+                or expires_in <= 0
+            ):
+                raise WeChatResponseError()
 
-        self._tokens[app_id] = _CachedToken(
-            value=token,
-            expires_at=now + float(expires_in),
-        )
-        return token
+            self._tokens[app_id] = _CachedToken(
+                value=token,
+                expires_at=now + float(expires_in),
+            )
+            return token
 
     def request_json(
         self,
