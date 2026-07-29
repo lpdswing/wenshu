@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import multiprocessing
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
@@ -59,6 +63,50 @@ class _Client:
                 return {"media_id": "draft-id\ninjected"}
             return {"media_id": "draft-media-id"}
         raise AssertionError(f"unexpected API path: {path}")
+
+
+class _ProcessClient:
+    account_id = _ACCOUNT_ID
+
+    def __init__(self, draft_calls) -> None:
+        self.draft_calls = draft_calls
+
+    def request_json(self, method, path, params=None, json=None, files=None):
+        if path == "/cgi-bin/media/uploadimg":
+            return {"url": "https://mmbiz.qpic.cn/body.png"}
+        if path == "/cgi-bin/material/add_material":
+            return {"media_id": "cover-media-id"}
+        if path == "/cgi-bin/draft/add":
+            with self.draft_calls.get_lock():
+                self.draft_calls.value += 1
+            time.sleep(0.2)
+            return {"media_id": "draft-media-id"}
+        raise AssertionError(f"unexpected API path: {path}")
+
+
+def _submit_from_process(preview, directory, start, draft_calls, results) -> None:
+    try:
+        start.wait(timeout=10)
+        result = create_draft(
+            preview,
+            _ProcessClient(draft_calls),
+            ReceiptStore(directory),
+        )
+        media_id = None if result.receipt is None else result.receipt.media_id
+        results.put((result.status, media_id))
+    except BaseException as exc:
+        results.put(("error", type(exc).__name__))
+
+
+def _exit_while_holding_lock(directory, acquired) -> None:
+    with ReceiptStore(directory).transaction():
+        acquired.set()
+        os._exit(0)
+
+
+def _acquire_lock_and_report(directory, acquired) -> None:
+    with ReceiptStore(directory).transaction():
+        acquired.set()
 
 
 def _write_png(path: Path, color: tuple[int, int, int]) -> None:
@@ -199,6 +247,117 @@ def test_second_identical_submission_returns_receipt_without_network(tmp_path):
     assert second.status == "duplicate"
     assert second.receipt == first.receipt
     assert second_client.calls == []
+
+
+def test_two_store_instances_serialize_same_hash_submission(tmp_path):
+    preview = _make_preview(tmp_path)
+    stores = (ReceiptStore(tmp_path), ReceiptStore(tmp_path))
+    start = threading.Barrier(2)
+
+    class SlowClient(_Client):
+        def request_json(self, method, path, params=None, json=None, files=None):
+            if path == "/cgi-bin/draft/add":
+                time.sleep(0.05)
+            return super().request_json(method, path, params, json, files)
+
+    client = SlowClient()
+
+    def submit(store):
+        start.wait()
+        return create_draft(preview, client, store)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(submit, stores))
+
+    assert sorted(result.status for result in results) == ["duplicate", "success"]
+    assert len(_draft_calls(client)) == 1
+    assert [call["path"] for call in client.calls].count(
+        "/cgi-bin/media/uploadimg"
+    ) == 1
+    assert [call["path"] for call in client.calls].count(
+        "/cgi-bin/material/add_material"
+    ) == 1
+    lock_path = tmp_path / ".wenshu-wechat-draft.lock"
+    assert stat.S_ISREG(lock_path.stat(follow_symlinks=False).st_mode)
+    assert stat.S_IMODE(lock_path.stat().st_mode) == 0o600
+
+
+def test_same_thread_nested_store_transactions_share_advisory_lock(tmp_path):
+    first = ReceiptStore(tmp_path)
+    second = ReceiptStore(tmp_path)
+
+    with first.transaction():
+        with second.transaction():
+            assert (tmp_path / ".wenshu-wechat-draft.lock").is_file()
+
+
+def test_different_processes_serialize_same_hash_submission(tmp_path):
+    preview = _make_preview(tmp_path)
+    context = multiprocessing.get_context("spawn")
+    start = context.Barrier(2)
+    draft_calls = context.Value("i", 0)
+    results = context.Queue()
+    processes = [
+        context.Process(
+            target=_submit_from_process,
+            args=(preview, tmp_path, start, draft_calls, results),
+        )
+        for _ in range(2)
+    ]
+
+    try:
+        for process in processes:
+            process.start()
+        outcomes = [results.get(timeout=20) for _ in processes]
+        for process in processes:
+            process.join(timeout=10)
+    finally:
+        for process in processes:
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=10)
+
+    assert [process.exitcode for process in processes] == [0, 0]
+    assert sorted(status for status, _media_id in outcomes) == [
+        "duplicate",
+        "success",
+    ]
+    assert {media_id for _status, media_id in outcomes} == {"draft-media-id"}
+    assert draft_calls.value == 1
+
+
+def test_process_exit_releases_advisory_lock(tmp_path):
+    context = multiprocessing.get_context("spawn")
+    first_acquired = context.Event()
+    crashing = context.Process(
+        target=_exit_while_holding_lock,
+        args=(tmp_path, first_acquired),
+    )
+    try:
+        crashing.start()
+        assert first_acquired.wait(timeout=10)
+        crashing.join(timeout=10)
+    finally:
+        if crashing.is_alive():
+            crashing.terminate()
+            crashing.join(timeout=10)
+    assert crashing.exitcode == 0
+
+    second_acquired = context.Event()
+    successor = context.Process(
+        target=_acquire_lock_and_report,
+        args=(tmp_path, second_acquired),
+    )
+    try:
+        successor.start()
+        assert second_acquired.wait(timeout=10)
+        successor.join(timeout=10)
+    finally:
+        if successor.is_alive():
+            successor.terminate()
+            successor.join(timeout=10)
+
+    assert successor.exitcode == 0
 
 
 @pytest.mark.parametrize(
@@ -406,8 +565,95 @@ def test_symlink_receipt_is_not_followed_or_overwritten(tmp_path):
     assert outside.read_text(encoding="utf-8") == "outside"
 
 
-def test_non_http_source_url_is_omitted_from_wechat_payload(tmp_path):
-    preview = _make_preview(tmp_path, source_url="javascript:alert(1)")
+def test_symlink_lock_file_is_not_followed(tmp_path):
+    if not hasattr(os, "symlink"):
+        pytest.skip("symlinks are unavailable")
+    preview = _make_preview(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.lock"
+    outside.write_text("outside", encoding="utf-8")
+    (tmp_path / ".wenshu-wechat-draft.lock").symlink_to(outside)
+    client = _Client()
+
+    result = create_draft(preview, client, ReceiptStore(tmp_path))
+
+    assert result.status == "failed"
+    assert result.error_kind == "receipt_invalid"
+    assert client.calls == []
+    assert outside.read_text(encoding="utf-8") == "outside"
+
+
+def test_non_regular_lock_file_is_rejected_without_network(tmp_path):
+    preview = _make_preview(tmp_path)
+    (tmp_path / ".wenshu-wechat-draft.lock").mkdir()
+    client = _Client()
+
+    result = create_draft(preview, client, ReceiptStore(tmp_path))
+
+    assert result.status == "failed"
+    assert result.error_kind == "receipt_invalid"
+    assert client.calls == []
+
+
+def test_hard_link_lock_file_is_rejected_without_mutating_target(tmp_path):
+    if not hasattr(os, "link"):
+        pytest.skip("hard links are unavailable")
+    preview = _make_preview(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}-outside-hard-link.lock"
+    outside.write_text("outside", encoding="utf-8")
+    os.link(outside, tmp_path / ".wenshu-wechat-draft.lock")
+    client = _Client()
+
+    result = create_draft(preview, client, ReceiptStore(tmp_path))
+
+    assert result.status == "failed"
+    assert result.error_kind == "receipt_invalid"
+    assert client.calls == []
+    assert outside.read_text(encoding="utf-8") == "outside"
+
+
+def test_existing_lock_file_permissions_are_restricted(tmp_path):
+    preview = _make_preview(tmp_path)
+    lock_path = tmp_path / ".wenshu-wechat-draft.lock"
+    lock_path.write_bytes(b"")
+    lock_path.chmod(0o666)
+
+    result = create_draft(preview, _Client(), ReceiptStore(tmp_path))
+
+    assert result.status == "success"
+    assert stat.S_IMODE(lock_path.stat().st_mode) == 0o600
+
+
+def test_replaced_receipt_directory_is_rejected_without_network(tmp_path):
+    article_directory = tmp_path / "article"
+    article_directory.mkdir()
+    preview = _make_preview(article_directory)
+    store = ReceiptStore(article_directory)
+    moved_directory = tmp_path / "moved"
+    article_directory.rename(moved_directory)
+    article_directory.mkdir()
+    client = _Client()
+
+    result = create_draft(preview, client, store)
+
+    assert result.status == "failed"
+    assert result.error_kind == "receipt_invalid"
+    assert client.calls == []
+    assert not (article_directory / ".wenshu-wechat-draft.lock").exists()
+
+
+@pytest.mark.parametrize(
+    "source_url",
+    [
+        "javascript:alert(1)",
+        "https://user:password@example.test/source",
+        "http://user@example.test/source",
+        "https://example.test:not-a-port/source",
+    ],
+)
+def test_non_http_or_credential_source_url_is_omitted_from_wechat_payload(
+    tmp_path, source_url
+):
+    preview = _make_preview(tmp_path, source_url=source_url)
     client = _Client()
 
     result = create_draft(preview, client, ReceiptStore(tmp_path))

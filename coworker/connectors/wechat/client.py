@@ -212,7 +212,10 @@ class WeChatClient:
         except httpx.RequestError as exc:
             transport_phase = (
                 "pre_send"
-                if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout))
+                if isinstance(
+                    exc,
+                    (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout),
+                )
                 else "post_send"
             )
         if response is None:

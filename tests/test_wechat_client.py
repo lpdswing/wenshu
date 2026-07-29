@@ -457,7 +457,7 @@ def test_client_repr_and_lifecycle_are_secret_safe():
         (httpx.ReadTimeout, "post_send"),
         (httpx.WriteError, "post_send"),
         (httpx.RemoteProtocolError, "post_send"),
-        (httpx.PoolTimeout, "post_send"),
+        (httpx.PoolTimeout, "pre_send"),
     ],
 )
 def test_transport_errors_preserve_only_safe_request_phase(

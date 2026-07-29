@@ -1,19 +1,21 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import hmac
 import html
 import json
 import os
 import re
+import stat
 import threading
 import tempfile
+import weakref
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Literal
-from urllib.parse import urlsplit
 
 from coworker.content.article import ArticleValidationError, parse_article_text
 from coworker.content.paths import ContentPathError
@@ -30,9 +32,15 @@ from .errors import (
 from .hashing import preview_hash as calculate_preview_hash
 from .images import WeChatImageError, upload_body_image, upload_cover
 from .preview import DraftPreview
-from .renderer import RenderedArticle, _portable_image_path, render_wechat_article
+from .renderer import (
+    RenderedArticle,
+    _portable_image_path,
+    _safe_external_url,
+    render_wechat_article,
+)
 
 _RECEIPT_NAME = "receipt.json"
+_LOCK_NAME = ".wenshu-wechat-draft.lock"
 _MAX_RECEIPT_BYTES = 16 * 1024
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 _ACCOUNT_ID_PATTERN = re.compile(r"sha256:[0-9a-f]{16}\Z")
@@ -68,8 +76,145 @@ class DraftResult:
     uploaded_assets: tuple[str, ...] = ()
 
 
+def _lock_descriptor(descriptor: int) -> None:
+    if os.name == "posix":
+        import fcntl
+
+        while True:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+                return
+            except InterruptedError:
+                continue
+            except OSError as exc:
+                raise ReceiptStoreError("receipt lock could not be acquired") from exc
+    if os.name == "nt":
+        import msvcrt
+
+        while True:
+            try:
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
+                return
+            except OSError as exc:
+                if exc.errno not in {errno.EACCES, errno.EDEADLK}:
+                    raise ReceiptStoreError("receipt lock could not be acquired") from exc
+    raise ReceiptStoreError("receipt locking is unavailable on this platform")
+
+
+def _unlock_descriptor(descriptor: int) -> None:
+    if os.name == "posix":
+        import fcntl
+
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        return
+    if os.name == "nt":
+        import msvcrt
+
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+
+
+def _open_windows_lock_file(path: Path) -> int:
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    generic_read = 0x80000000
+    generic_write = 0x40000000
+    file_share_read = 0x00000001
+    file_share_write = 0x00000002
+    open_always = 4
+    file_attribute_directory = 0x00000010
+    file_attribute_normal = 0x00000080
+    file_attribute_reparse_point = 0x00000400
+    file_flag_open_reparse_point = 0x00200000
+
+    class _ByHandleFileInformation(ctypes.Structure):
+        _fields_ = [
+            ("file_attributes", wintypes.DWORD),
+            ("creation_time", wintypes.FILETIME),
+            ("last_access_time", wintypes.FILETIME),
+            ("last_write_time", wintypes.FILETIME),
+            ("volume_serial_number", wintypes.DWORD),
+            ("file_size_high", wintypes.DWORD),
+            ("file_size_low", wintypes.DWORD),
+            ("number_of_links", wintypes.DWORD),
+            ("file_index_high", wintypes.DWORD),
+            ("file_index_low", wintypes.DWORD),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    create_file.restype = wintypes.HANDLE
+    get_file_information = kernel32.GetFileInformationByHandle
+    get_file_information.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(_ByHandleFileInformation),
+    ]
+    get_file_information.restype = wintypes.BOOL
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = [wintypes.HANDLE]
+    close_handle.restype = wintypes.BOOL
+
+    handle = create_file(
+        str(path),
+        generic_read | generic_write,
+        file_share_read | file_share_write,
+        None,
+        open_always,
+        file_attribute_normal | file_flag_open_reparse_point,
+        None,
+    )
+    invalid_handle = ctypes.c_void_p(-1).value
+    if handle == invalid_handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+
+    information = _ByHandleFileInformation()
+    if not get_file_information(handle, ctypes.byref(information)):
+        error = ctypes.WinError(ctypes.get_last_error())
+        close_handle(handle)
+        raise error
+    if (
+        information.file_attributes & file_attribute_directory
+        or information.file_attributes & file_attribute_reparse_point
+        or information.number_of_links != 1
+    ):
+        close_handle(handle)
+        raise ReceiptStoreError("receipt lock file is not safe")
+
+    flags = os.O_RDWR | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOINHERIT", 0)
+    try:
+        return msvcrt.open_osfhandle(int(handle), flags)
+    except BaseException:
+        close_handle(handle)
+        raise
+
+
+class _DirectoryLock:
+    __slots__ = ("thread_lock", "thread_state", "__weakref__")
+
+    def __init__(self) -> None:
+        self.thread_lock = threading.RLock()
+        self.thread_state = threading.local()
+
+
 class ReceiptStore:
     """A receipt store permanently bound to one existing article directory."""
+
+    _locks_guard = threading.Lock()
+    _directory_locks: weakref.WeakValueDictionary[object, _DirectoryLock] = (
+        weakref.WeakValueDictionary()
+    )
 
     def __init__(self, article_directory: str | Path) -> None:
         try:
@@ -79,7 +224,12 @@ class ReceiptStore:
             raise ReceiptStoreError("receipt directory is not safe") from exc
         self._directory = directory
         self._identity = identity
-        self._lock = threading.RLock()
+        with self._locks_guard:
+            directory_lock = self._directory_locks.get(identity)
+            if directory_lock is None:
+                directory_lock = _DirectoryLock()
+                self._directory_locks[identity] = directory_lock
+            self._directory_lock = directory_lock
 
     @property
     def article_directory(self) -> Path:
@@ -91,8 +241,87 @@ class ReceiptStore:
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
-        with self._lock:
-            yield
+        with self._directory_lock.thread_lock:
+            state = self._directory_lock.thread_state
+            depth = getattr(state, "depth", 0)
+            if depth:
+                state.depth = depth + 1
+                try:
+                    yield
+                finally:
+                    state.depth -= 1
+                return
+
+            descriptor = self._open_lock_file()
+            locked = False
+            try:
+                _lock_descriptor(descriptor)
+                locked = True
+                state.depth = 1
+                yield
+            finally:
+                if locked:
+                    del state.depth
+                try:
+                    if locked:
+                        _unlock_descriptor(descriptor)
+                finally:
+                    os.close(descriptor)
+
+    def _open_lock_file(self) -> int:
+        flags = (
+            os.O_RDWR
+            | os.O_CREAT
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_BINARY", 0)
+            | getattr(os, "O_NOINHERIT", 0)
+        )
+        descriptor = -1
+        lock_path: Path | None = None
+        try:
+            with _BoundDirectory(self._directory, self._identity) as directory:
+                if directory.dir_fd is not None:
+                    descriptor = os.open(
+                        _LOCK_NAME,
+                        flags,
+                        0o600,
+                        dir_fd=directory.dir_fd,
+                    )
+                elif directory.bound_path is not None:
+                    lock_path = directory.bound_path / _LOCK_NAME
+                    if os.name == "nt":
+                        descriptor = _open_windows_lock_file(lock_path)
+                    else:  # pragma: no cover - secure binding supports POSIX and Windows
+                        descriptor = os.open(lock_path, flags, 0o600)
+                else:  # pragma: no cover - guarded by _BoundDirectory
+                    raise ReceiptStoreError("receipt lock directory is unavailable")
+                metadata = os.fstat(descriptor)
+                if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                    raise ReceiptStoreError("receipt lock file is not safe")
+                if lock_path is not None:
+                    path_metadata = lock_path.stat(follow_symlinks=False)
+                    if (
+                        not stat.S_ISREG(path_metadata.st_mode)
+                        or (path_metadata.st_dev, path_metadata.st_ino)
+                        != (metadata.st_dev, metadata.st_ino)
+                    ):
+                        raise ReceiptStoreError("receipt lock file is not safe")
+                if hasattr(os, "fchmod"):
+                    os.fchmod(descriptor, 0o600)
+                elif directory.bound_path is not None:
+                    os.chmod(directory.bound_path / _LOCK_NAME, 0o600)
+                if os.name == "nt":
+                    os.ftruncate(descriptor, 1)
+            return descriptor
+        except ReceiptStoreError:
+            if descriptor >= 0:
+                os.close(descriptor)
+            raise
+        except (OSError, ContentPathError) as exc:
+            if descriptor >= 0:
+                os.close(descriptor)
+            raise ReceiptStoreError("receipt lock file is not safe") from exc
 
     def require_same_directory(self, path: str | Path) -> None:
         try:
@@ -325,13 +554,7 @@ def _replace_image_placeholders(
 def _source_url(value: str | None) -> str | None:
     if not isinstance(value, str):
         return None
-    try:
-        parsed = urlsplit(value)
-    except ValueError:
-        return None
-    if parsed.scheme.casefold() not in {"http", "https"} or not parsed.hostname:
-        return None
-    return value
+    return _safe_external_url(value)
 
 
 def _failure_kind(error: BaseException) -> str:
@@ -363,7 +586,7 @@ def _asset_label(category: str, relative_path: str) -> str:
     return f"{category}:{_portable_image_path(relative_path)}"
 
 
-def create_draft(
+def _create_draft(
     preview: DraftPreview,
     client: WeChatClient,
     receipt_store: ReceiptStore,
@@ -497,6 +720,19 @@ def create_draft(
                 tuple(uploaded),
             )
         return DraftResult("success", receipt, uploaded_assets=tuple(uploaded))
+
+
+def create_draft(
+    preview: DraftPreview,
+    client: WeChatClient,
+    receipt_store: ReceiptStore,
+) -> DraftResult:
+    """Create one WeChat draft, preserving safe idempotency and uncertain outcomes."""
+
+    try:
+        return _create_draft(preview, client, receipt_store)
+    except ReceiptStoreError:
+        return DraftResult("failed", None, "receipt_invalid")
 
 
 __all__ = [
