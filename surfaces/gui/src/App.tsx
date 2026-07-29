@@ -379,7 +379,8 @@ export function App() {
   // On boot with no seeded workspace, reopen the last thing the user had — most recent
   // conversation (restores its folder + agent + transcript), else the most recent project
   // folder. Only a true first run (nothing to resume) falls through to the folder gate.
-  const resumeLastOrGate = async () => {
+  const resumeLastOrGate = async (defaultAgent: string) => {
+    setAgent(defaultAgent);
     let loadedSessions: SessionInfo[] = [];
     try {
       loadedSessions = (await getSessions()).filter((s) => s.session_id && !s.session_id.startsWith("__"));
@@ -410,7 +411,7 @@ export function App() {
       const recents = await getRecentWorkspaces();
       setProjects(recents);
       // Only auto-adopt a recent folder for gated surfaces (Code). Cowork starts orphan.
-      if (gatesWorkspace(agent)) {
+      if (gatesWorkspace(defaultAgent)) {
         const ws = recents.find((w) => w.exists) || recents[0];
         if (ws) {
           setWorkspace(ws.path);
@@ -421,7 +422,7 @@ export function App() {
     } catch {
       /* fall through */
     }
-    setShowGate(gatesWorkspace(agent)); // only Code forces a first-run folder gate
+    setShowGate(gatesWorkspace(defaultAgent)); // only project-scoped defaults force a first-run folder gate
   };
 
   useEffect(() => {
@@ -432,6 +433,8 @@ export function App() {
           if (cancelled) return;
           setModel(h.model);
           setProduct(h.product);
+          const defaultAgent = h.product.default_persona || "cowork";
+          setAgent(defaultAgent);
           // First-run setup wizard (desktop): show until the user completes/dismisses it.
           if (isTauri()) {
             getSettings()
@@ -443,8 +446,8 @@ export function App() {
           // initial sessionId would connect against an empty/stale workspace and the server
           // would provision a junk per-conversation scratch dir for it before resume could
           // flip to the real session. Cowork ignores default_workspace (a Code concept).
-          if (h.default_workspace && gatesWorkspace(agent)) setWorkspace(h.default_workspace);
-          else await resumeLastOrGate();
+          if (h.default_workspace && gatesWorkspace(defaultAgent)) setWorkspace(h.default_workspace);
+          else await resumeLastOrGate(defaultAgent);
           // The mount-time loadSettings races the sidecar boot and swallows its failure —
           // on a cold start that left "Loading models…" stuck until the user visited
           // Settings (owner-hit 2026-07-23). Health just answered, so this one lands.
@@ -641,6 +644,7 @@ export function App() {
               reason: d.reason,
               category: d.category,
               standingTarget: d.standing_target || undefined,
+              onceOnly: d.approval_once_only === true,
             },
           ]);
           break;

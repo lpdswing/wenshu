@@ -10,7 +10,7 @@ import aisuite as ai
 import pytest
 from coworker.engine import ApprovalOutcome, PermissionRequest, TurnEngine
 from coworker.events import EventType
-from coworker.permissions import PermissionEngine
+from coworker.permissions import Mode, PermissionEngine
 from coworker.providers import (
     AssistantTurn,
     ModelCapabilities,
@@ -317,6 +317,51 @@ def test_one_shot_tool_rejects_persistent_approval_scope(tmp_path):
     assert finished.data["reason"] == "persistent approval is not allowed for this tool"
     assert executed == []
     assert "paid_tool" not in engine.permissions.session_allow_tools
+
+
+def test_one_shot_tool_requires_approval_even_in_auto_mode(tmp_path):
+    executed: list[str] = []
+    requests: list[PermissionRequest] = []
+
+    def paid_tool(value: str) -> str:
+        executed.append(value)
+        return value
+
+    async def approve_once(request: PermissionRequest):
+        requests.append(request)
+        return ApprovalOutcome.ONCE
+
+    registry = ToolRegistry()
+    registry.register(
+        paid_tool,
+        metadata=ai.ToolMetadata(
+            name="paid_tool",
+            category="content-generation",
+            risk_level="medium",
+            capabilities=["paid-operation"],
+            requires_approval=True,
+        ),
+        approval_once_only=True,
+    )
+    engine = TurnEngine(
+        provider=ScriptedProvider(
+            [_tool_turn("paid_tool", {"value": "run"}), _text_turn("done")]
+        ),
+        registry=registry,
+        permissions=PermissionEngine(workspace_root=tmp_path, mode=Mode.AUTO),
+        model="gpt-5.5",
+        approver=approve_once,
+    )
+
+    events = _collect(engine, "run paid tool")
+
+    permission = next(
+        event for event in events if event.type is EventType.PERMISSION_REQUIRED
+    )
+    assert permission.data["reason"] == "requires one-time approval"
+    assert permission.data["approval_once_only"] is True
+    assert requests[0].approval_once_only is True
+    assert executed == ["run"]
 
 
 def test_tool_result_display_sidecar_is_not_truncated_or_sent_to_provider(tmp_path):
@@ -727,61 +772,8 @@ def test_outbound_replaces_images_for_non_vision_models(tmp_path):
     assert engine.messages[-1]["content"][1]["type"] == "image_url"  # history untouched
 
 
-def test_generate_image_tool_is_scoped_to_workspace_knowledge_agents(tmp_path):
-    from coworker.agent import build_engine
-    from coworker.agents import code_agent, cowork_agent
-    from coworker.secrets import SecretStore
-
-    secrets = SecretStore(tmp_path / "secrets.json")
-    cowork = build_engine(
-        agent=cowork_agent(),
-        workspace=tmp_path,
-        provider=ScriptedProvider([]),
-        secrets=secrets,
-    )
-    code = build_engine(
-        agent=code_agent(),
-        workspace=tmp_path,
-        provider=ScriptedProvider([]),
-        secrets=secrets,
-    )
-    try:
-        assert "generate_image" in cowork.registry.names()
-        assert "generate_image" not in code.registry.names()
-    finally:
-        cowork.executor.close()
-        code.executor.close()
 
 
-def test_generate_image_tool_observes_engine_root_revocation(tmp_path):
-    from coworker.agent import build_engine
-    from coworker.agents import cowork_agent
-    from coworker.roots import RootDir
-    from coworker.secrets import SecretStore
-
-    primary = tmp_path / "primary"
-    extra = tmp_path / "extra"
-    primary.mkdir()
-    extra.mkdir()
-    engine = build_engine(
-        agent=cowork_agent(),
-        workspace=primary,
-        roots=[
-            RootDir(path=primary, writable=True),
-            RootDir(path=extra, writable=True),
-        ],
-        provider=ScriptedProvider([]),
-        secrets=SecretStore(tmp_path / "secrets.json"),
-    )
-    try:
-        engine.roots[:] = [root for root in engine.roots if root.path != extra.resolve()]
-        with pytest.raises(ValueError, match="outside"):
-            engine.registry.execute(
-                "generate_image",
-                {"prompt": "图", "output_path": str(extra / "cover.png")},
-            )
-    finally:
-        engine.executor.close()
 
 def test_native_content_tools_are_scoped_to_wenshu_cowork(tmp_path):
     from coworker.agent import build_engine

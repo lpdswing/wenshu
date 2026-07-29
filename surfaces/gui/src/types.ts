@@ -94,6 +94,8 @@ export type Item =
       // The exact target a standing rule could pin (server-computed) — with a run
       // context, the card offers "Allow every time" (§25).
       standingTarget?: string;
+      // Host-declared invariant: this call must never offer a persistent grant.
+      onceOnly?: boolean;
       resolved?: ApprovalDecision;
     }
   | {

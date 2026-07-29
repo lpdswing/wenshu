@@ -558,6 +558,11 @@ class TurnEngine:
         )
         allowed = decision.allowed
         reason = decision.reason
+        needs_user = decision.needs_user
+        if allowed and spec and spec.approval_once_only:
+            allowed = False
+            needs_user = True
+            reason = "requires one-time approval"
 
         if allowed and decision.rule:
             # A task-scoped standing rule auto-allowed this call: audit the exact rule
@@ -568,7 +573,7 @@ class TurnEngine:
                 tool_call, stage="auto_allowed", status="allowed", reason=reason
             )
 
-        if not allowed and decision.needs_user:
+        if not allowed and needs_user:
             display_arguments = self._approval_display_arguments(
                 spec,
                 tool_call.arguments,
@@ -582,7 +587,7 @@ class TurnEngine:
                         if display_arguments is not None
                         else tool_call.arguments
                     ),
-                    "reason": decision.reason,
+                    "reason": reason,
                     "category": getattr(metadata, "category", ""),
                     # The exact target a standing rule could pin, or None when the call
                     # isn't eligible (no declared target arg / exec risk). Surfaces use it
@@ -598,14 +603,14 @@ class TurnEngine:
                     ),
                 },
             )
-            self._audit(tool_call, stage="approval_requested", reason=decision.reason)
+            self._audit(tool_call, stage="approval_requested", reason=reason)
             outcome = await self._interruptible(
                 self.approver(
                     PermissionRequest(
                         tool_name=tool_call.name,
                         arguments=tool_call.arguments,
                         metadata=metadata,
-                        reason=decision.reason,
+                        reason=reason,
                         tool_call_id=tool_call.id,
                         display_arguments=display_arguments,
                         approval_once_only=bool(spec and spec.approval_once_only),

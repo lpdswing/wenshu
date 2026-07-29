@@ -266,7 +266,9 @@ function Buttons({
 }) {
   const connector = item.category === "connector";
   const oneShotOnly =
-    item.name === "generate_article_assets" || item.name === "create_wechat_draft";
+    item.onceOnly ||
+    item.name === "generate_article_assets" ||
+    item.name === "create_wechat_draft";
   const offerStanding = !oneShotOnly && !!(runTask && item.standingTarget);
   return (
     <div className="approval-btns">

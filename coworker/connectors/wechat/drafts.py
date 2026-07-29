@@ -662,8 +662,17 @@ def _create_draft(
                 "/cgi-bin/draft/add",
                 json={"articles": [article_payload]},
             )
-        except (WeChatAPIError, WeChatCredentialError, WeChatHTTPError) as exc:
+        except (WeChatAPIError, WeChatCredentialError) as exc:
             return _failed(exc, uploaded)
+        except WeChatHTTPError as exc:
+            if exc.status_code < 500:
+                return _failed(exc, uploaded)
+            return DraftResult(
+                "unknown",
+                None,
+                "http",
+                tuple(uploaded),
+            )
         except WeChatTransportError as exc:
             if exc.phase == "pre_send":
                 return _failed(exc, uploaded)

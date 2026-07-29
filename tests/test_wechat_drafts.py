@@ -19,6 +19,7 @@ from coworker.connectors.wechat import (
     DraftReceipt,
     PreviewImage,
     ReceiptStore,
+    WeChatHTTPError,
     WeChatTransportError,
     classify_wechat_error,
     create_draft,
@@ -57,6 +58,10 @@ class _Client:
                 raise WeChatTransportError("pre_send")
             if self.failure == "post_send":
                 raise WeChatTransportError("post_send")
+            if self.failure == "http_400":
+                raise WeChatHTTPError(400)
+            if self.failure == "http_502":
+                raise WeChatHTTPError(502)
             if self.failure == "invalid_response":
                 return {}
             if self.failure == "invalid_media_id":
@@ -364,6 +369,8 @@ def test_process_exit_releases_advisory_lock(tmp_path):
     ("failure", "expected_status", "expected_kind"),
     [
         ("api", "failed", "permission_denied"),
+        ("http_400", "failed", "http"),
+        ("http_502", "unknown", "http"),
         ("pre_send", "failed", "transport"),
         ("post_send", "unknown", "transport"),
         ("invalid_response", "unknown", "invalid_response"),

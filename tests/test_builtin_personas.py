@@ -49,10 +49,9 @@ def test_default_persona_is_wenshu_content_assistant(tmp_path):
     assert "prepare_article_review" in agent.system_prompt
     assert "generate_article_assets" in agent.system_prompt
     assert "reviewed_hash" in agent.system_prompt
-    assert not any(
-        token in agent.system_prompt
-        for token in ("write_article", "create_wechat_draft")
-    )
+    assert "prepare_wechat_draft" in agent.system_prompt
+    assert "create_wechat_draft" in agent.system_prompt
+    assert "write_article" not in agent.system_prompt
 
 
 def test_ops_persona_composes_knowledge_toolset(tmp_path):

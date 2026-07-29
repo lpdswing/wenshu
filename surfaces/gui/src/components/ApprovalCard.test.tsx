@@ -54,6 +54,24 @@ describe("ApprovalCard — standing scoped approvals (§25)", () => {
     expect(screen.queryByText("此自动化始终允许")).toBeNull();
   });
 
+  it("honors host one-shot metadata for tools without a hardcoded name", () => {
+    render(
+      <ApprovalCard
+        item={sendApproval({
+          name: "future_paid_operation",
+          onceOnly: true,
+          standingTarget: "external-target",
+        })}
+        onApprove={vi.fn()}
+        runTask={RUN_TASK}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "批准一次" })).toBeTruthy();
+    expect(screen.queryByText("本次会话始终允许")).toBeNull();
+    expect(screen.queryByText("此自动化始终允许")).toBeNull();
+  });
+
   it("renders the create_scheduled_task consent proposal: reads disclose, writes grant", () => {
     render(
       <ApprovalCard

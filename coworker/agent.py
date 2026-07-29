@@ -36,7 +36,6 @@ from .image_generation import (
     ImageGenerationProvider,
     build_image_provider,
     describe_image_provider,
-    make_generate_image_tool,
 )
 from .secrets import SecretStore, state_dir
 from .skills import SkillLoader, skill_catalog_text, skill_tools
@@ -219,15 +218,6 @@ def build_engine(
             content.generate_article_assets,
             approval_arguments=content.generate_article_assets_approval_arguments,
             approval_once_only=True,
-        )
-    if agent.family == "knowledge" and any(root.writable for root in root_list):
-        registry.register(
-            make_generate_image_tool(
-                secrets=secrets,
-                roots=lambda: (
-                    root.path for root in root_list if root.writable
-                ),
-            )
         )
     messaging_enabled = any(
         setting.enabled

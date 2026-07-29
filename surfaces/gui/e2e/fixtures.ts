@@ -759,6 +759,7 @@ export async function mockApi(
             },
             reason: "",
             category: "connector",
+            approval_once_only: true,
           });
           return;
         }
