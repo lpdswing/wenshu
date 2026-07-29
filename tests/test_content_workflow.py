@@ -115,6 +115,13 @@ async def test_review_change_re_review_and_generate_complete_article_assets(
     assert result["reviewed_hash"] == second_review["reviewed_hash"]
     assert provider.max_active == 1
     assert len(provider.calls) == 2
+    assert [
+        (call.prompt, call.output_path.name, call.aspect_ratio)
+        for call in provider.calls
+    ] == [
+        ("深蓝色知识网络封面，保留标题空间", "cover.png", "16:9"),
+        ("青绿色内容工作流示意图", "section-1.png", "16:9"),
+    ]
 
     expected_files = [
         "article.md",
@@ -135,6 +142,17 @@ async def test_review_change_re_review_and_generate_complete_article_assets(
             assert image.format == "PNG"
             assert image.size == (64, 36)
 
+    expected_assets = [
+        {
+            "output_path": relative_path,
+            "sha256": hashlib.sha256(
+                (tmp_path / relative_path).read_bytes()
+            ).hexdigest(),
+        }
+        for relative_path in ("cover.png", "images/section-1.png")
+    ]
+    assert result["assets"] == expected_assets
+
     manifest_path = tmp_path / "assets.manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest == {
@@ -142,7 +160,7 @@ async def test_review_change_re_review_and_generate_complete_article_assets(
         "plan_hash": result["plan_hash"],
         "provider": "openai",
         "model": "gpt-image-2",
-        "assets": result["assets"],
+        "assets": expected_assets,
     }
     assert "prompt" not in manifest_path.read_text(encoding="utf-8")
     for asset in manifest["assets"]:
