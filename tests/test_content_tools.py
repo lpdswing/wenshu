@@ -67,6 +67,22 @@ class SpyImageProvider:
         )
 
 
+class ParentSwapImageProvider(SpyImageProvider):
+    def __init__(self, article_directory: Path, outside_directory: Path) -> None:
+        super().__init__()
+        self.article_directory = article_directory
+        self.outside_directory = outside_directory
+
+    async def generate(self, request: ImageRequest) -> ImageResult:
+        result = await super().generate(request)
+        if len(self.calls) == 2:
+            (self.article_directory / "images").symlink_to(
+                self.outside_directory,
+                target_is_directory=True,
+            )
+        return result
+
+
 def make_tools(tmp_path: Path, provider):
     from coworker.content.tools import make_content_tools
 
@@ -219,10 +235,17 @@ async def test_success_writes_prompt_free_manifest_after_serial_generation(
         VALID_ILLUSTRATION_PLAN,
     )
 
-    assert [call.output_path for call in spy.calls] == [
-        (tmp_path / "cover.png").resolve(),
-        (tmp_path / "images/section-1.png").resolve(),
+    final_paths = [
+        tmp_path / "cover.png",
+        tmp_path / "images/section-1.png",
     ]
+    assert [call.output_path.name for call in spy.calls] == [
+        "cover.png",
+        "section-1.png",
+    ]
+    assert all(
+        not call.output_path.is_relative_to(tmp_path.resolve()) for call in spy.calls
+    )
     assert result["ok"] is True
     assert result["status"] == "completed"
     assert result["reused"] is False
@@ -230,9 +253,23 @@ async def test_success_writes_prompt_free_manifest_after_serial_generation(
     assert result["model"] == "gpt-image-2"
     assert len(result["plan_hash"]) == 64
     assert result["assets"] == [
-        {"output_path": "cover.png", "sha256": spy.calls[0].output_path.read_bytes() and hashlib.sha256(spy.calls[0].output_path.read_bytes()).hexdigest()},
-        {"output_path": "images/section-1.png", "sha256": hashlib.sha256(spy.calls[1].output_path.read_bytes()).hexdigest()},
+        {
+            "output_path": "cover.png",
+            "sha256": hashlib.sha256(final_paths[0].read_bytes()).hexdigest(),
+        },
+        {
+            "output_path": "images/section-1.png",
+            "sha256": hashlib.sha256(final_paths[1].read_bytes()).hexdigest(),
+        },
     ]
+    assert [path.read_bytes() for path in final_paths] == [
+        b"generated:cover.png",
+        b"generated:section-1.png",
+    ]
+    assert all(
+        not call.output_path.exists() and not call.output_path.parent.exists()
+        for call in spy.calls
+    )
 
     manifest_path = tmp_path / "assets.manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -297,6 +334,90 @@ async def test_tampered_manifest_asset_is_not_reused(tmp_path: Path) -> None:
 
     assert result["reused"] is False
     assert len(spy.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_article_parent_swap_is_bound_before_generation_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from coworker.content import review as review_module
+    from coworker.content.paths import ContentPathError
+
+    allowed = tmp_path / "allowed"
+    article_directory = allowed / "draft"
+    article_directory.mkdir(parents=True)
+    article_path = write_article(article_directory / "article.md")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    write_article(outside / "article.md", ARTICLE.replace("文枢内容流水线", "外部机密"))
+
+    spy = SpyImageProvider()
+    tools = make_tools(allowed, spy)
+    review = tools.prepare_article_review(str(article_path))
+    validated_directory = allowed / "validated-draft"
+    original_read_text = review_module._BoundDirectory.read_text
+    swapped = False
+
+    def swap_then_read(directory, name, expected=None):
+        nonlocal swapped
+        if name == article_path.name and not swapped:
+            article_directory.rename(validated_directory)
+            article_directory.symlink_to(outside, target_is_directory=True)
+            swapped = True
+        return original_read_text(directory, name, expected)
+
+    monkeypatch.setattr(review_module._BoundDirectory, "read_text", swap_then_read)
+
+    with pytest.raises(ContentPathError):
+        await tools.generate_article_assets(
+            str(article_path),
+            review["reviewed_hash"],
+            VALID_COVER_REQUEST,
+            VALID_ILLUSTRATION_PLAN,
+        )
+
+    assert swapped
+    assert spy.calls == []
+    assert not (outside / "cover.png").exists()
+    assert not (outside / "assets.manifest.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_parent_symlink_swap_cannot_escape_staging_commit(
+    tmp_path: Path,
+) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-outside-assets"
+    outside.mkdir()
+    provider = ParentSwapImageProvider(tmp_path, outside)
+    tools = make_tools(tmp_path, provider)
+    article_path = write_article(tmp_path / "article.md")
+    review = tools.prepare_article_review(str(article_path))
+
+    result = await tools.generate_article_assets(
+        str(article_path),
+        review["reviewed_hash"],
+        VALID_COVER_REQUEST,
+        VALID_ILLUSTRATION_PLAN,
+    )
+
+    cover_path = tmp_path / "cover.png"
+    assert result["ok"] is False
+    assert result["status"] == "partial"
+    assert result["assets"] == [
+        {
+            "output_path": "cover.png",
+            "sha256": hashlib.sha256(cover_path.read_bytes()).hexdigest(),
+        }
+    ]
+    assert result["failed_asset"]["output_path"] == "images/section-1.png"
+    assert result["failed_asset"]["error_type"] == "ContentPathError"
+    assert list(outside.iterdir()) == []
+    assert all(
+        not call.output_path.exists() and not call.output_path.parent.exists()
+        for call in provider.calls
+    )
+    assert not (tmp_path / "assets.manifest.json").exists()
 
 
 @pytest.mark.asyncio

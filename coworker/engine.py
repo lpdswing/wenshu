@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import inspect
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -633,9 +634,12 @@ class TurnEngine:
         yield True
 
     def _execute_sync(self, tool_call: ToolCall) -> tuple[Any, str]:
-        """Execute one authorized call (runs in a worker thread)."""
+        """Execute one authorized call in a worker thread, awaiting async tools there."""
         try:
-            return self.registry.execute(tool_call.name, tool_call.arguments), "ok"
+            result = self.registry.execute(tool_call.name, tool_call.arguments)
+            if inspect.isawaitable(result):
+                result = asyncio.run(result)
+            return result, "ok"
         except Exception as exc:
             return {"error": str(exc), "error_type": type(exc).__name__}, "error"
 

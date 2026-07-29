@@ -1,18 +1,19 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import html
 import os
 import stat
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
+from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import Any, BinaryIO, TypeVar
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
-from .article import _article_from_text
+from .article import parse_article_text
 from .hashing import article_text_hash
 from .paths import ContentPathError, resolve_in_roots
 
@@ -138,6 +139,7 @@ _HAS_POSIX_DIR_FD = (
     and hasattr(os, "O_DIRECTORY")
     and hasattr(os, "O_NOFOLLOW")
     and os.open in os.supports_dir_fd
+    and os.mkdir in os.supports_dir_fd
     and os.rename in os.supports_dir_fd
     and os.unlink in os.supports_dir_fd
 )
@@ -163,7 +165,10 @@ def _open_posix_directory(path: Path, expected: _PathIdentity) -> int:
     return descriptor
 
 
-def _open_windows_directory(path: Path, expected: _PathIdentity) -> int:
+def _open_windows_directory(
+    path: Path,
+    expected: _PathIdentity,
+) -> tuple[int, Path]:
     import ctypes
     from ctypes import wintypes
 
@@ -209,6 +214,14 @@ def _open_windows_directory(path: Path, expected: _PathIdentity) -> int:
         ctypes.POINTER(_ByHandleFileInformation),
     ]
     get_file_information.restype = wintypes.BOOL
+    get_final_path_name = kernel32.GetFinalPathNameByHandleW
+    get_final_path_name.argtypes = [
+        wintypes.HANDLE,
+        wintypes.LPWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+    ]
+    get_final_path_name.restype = wintypes.DWORD
     close_handle = kernel32.CloseHandle
     close_handle.argtypes = [wintypes.HANDLE]
     close_handle.restype = wintypes.BOOL
@@ -259,7 +272,28 @@ def _open_windows_directory(path: Path, expected: _PathIdentity) -> int:
     ):
         close_handle(handle)
         raise ContentPathError(f"content directory changed after validation: {path}")
-    return int(handle)
+
+    required_length = get_final_path_name(handle, None, 0, 0)
+    if required_length == 0:
+        error = ctypes.WinError(ctypes.get_last_error())
+        close_handle(handle)
+        raise ContentPathError(
+            f"content directory final path is unavailable: {path}"
+        ) from error
+    final_path_buffer = ctypes.create_unicode_buffer(required_length)
+    written_length = get_final_path_name(
+        handle,
+        final_path_buffer,
+        required_length,
+        0,
+    )
+    if written_length == 0 or written_length >= required_length:
+        error = ctypes.WinError(ctypes.get_last_error())
+        close_handle(handle)
+        raise ContentPathError(
+            f"content directory final path is unavailable: {path}"
+        ) from error
+    return int(handle), Path(final_path_buffer.value)
 
 
 def _close_windows_directory(handle: int) -> None:
@@ -274,22 +308,115 @@ def _close_windows_directory(handle: int) -> None:
     close_handle(handle)
 
 
+_T = TypeVar("_T")
+
+
+def _relative_parts(relative_path: str | Path) -> tuple[str, ...]:
+    raw_path = os.fspath(relative_path)
+    if not raw_path or "\x00" in raw_path:
+        raise ContentPathError("content output path must be a non-empty relative path")
+
+    windows_path = PureWindowsPath(raw_path)
+    normalized_path = PurePosixPath(raw_path.replace("\\", "/"))
+    if (
+        windows_path.is_absolute()
+        or windows_path.drive
+        or normalized_path.is_absolute()
+    ):
+        raise ContentPathError("content output path must be relative")
+
+    parts = normalized_path.parts
+    if not parts or any(part in {"", ".", ".."} for part in parts):
+        raise ContentPathError("content output path contains an unsafe component")
+    return parts
+
+
+def _ensure_child_directory(path: Path, *, create: bool) -> _PathIdentity:
+    try:
+        status = path.stat(follow_symlinks=False)
+    except FileNotFoundError:
+        if not create:
+            raise
+        try:
+            path.mkdir(mode=0o700)
+        except FileExistsError:
+            pass
+        try:
+            status = path.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise ContentPathError(
+                "content output parent changed while it was being created"
+            ) from exc
+    except OSError as exc:
+        raise ContentPathError("content output parent could not be inspected") from exc
+
+    if not stat.S_ISDIR(status.st_mode):
+        raise ContentPathError(
+            "content output parent changed to a non-directory or symbolic link"
+        )
+    return _PathIdentity(status.st_dev, status.st_ino)
+
+
+@dataclass(frozen=True)
+class _BoundParent:
+    dir_fd: int | None
+    path: Path | None
+    checks: tuple[tuple[Path, _PathIdentity], ...] = ()
+
+    def validate(self) -> None:
+        for path, expected in self.checks:
+            try:
+                status = path.stat(follow_symlinks=False)
+            except OSError as exc:
+                raise ContentPathError(
+                    "content output parent changed after validation"
+                ) from exc
+            if not stat.S_ISDIR(status.st_mode) or not _matches_identity(
+                status,
+                expected,
+            ):
+                raise ContentPathError(
+                    "content output parent changed after validation"
+                )
+
+
 class _BoundDirectory:
     def __init__(self, path: Path, expected: _PathIdentity) -> None:
         self.path = path
         self.expected = expected
         self.dir_fd: int | None = None
         self.windows_handle: int | None = None
+        self.bound_path: Path | None = None
 
     def __enter__(self) -> _BoundDirectory:
+        if (
+            self.dir_fd is not None
+            or self.windows_handle is not None
+            or self.bound_path is not None
+        ):
+            raise RuntimeError("content directory is already bound")
         if _HAS_POSIX_DIR_FD:
             self.dir_fd = _open_posix_directory(self.path, self.expected)
         elif os.name == "nt":
-            self.windows_handle = _open_windows_directory(self.path, self.expected)
-        else:
-            raise ContentPathError(
-                "secure content directory operations are unavailable on this platform"
+            self.windows_handle, self.bound_path = _open_windows_directory(
+                self.path,
+                self.expected,
             )
+        else:
+            try:
+                status = self.path.stat(follow_symlinks=False)
+            except OSError as exc:
+                raise ContentPathError(
+                    f"content directory changed after validation: {self.path}"
+                ) from exc
+            if not stat.S_ISDIR(status.st_mode) or not _matches_identity(
+                status,
+                self.expected,
+            ):
+                raise ContentPathError(
+                    f"content directory changed after validation: {self.path}"
+                )
+            self.bound_path = self.path
         return self
 
     def __exit__(
@@ -304,40 +431,216 @@ class _BoundDirectory:
         if self.windows_handle is not None:
             _close_windows_directory(self.windows_handle)
             self.windows_handle = None
+        self.bound_path = None
 
-    def read_text(self, name: str, expected: _PathIdentity) -> str:
-        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    @contextmanager
+    def _open_parent(
+        self,
+        parts: tuple[str, ...],
+        *,
+        create: bool,
+    ) -> Iterator[_BoundParent]:
         if self.dir_fd is not None:
-            flags |= os.O_NOFOLLOW
+            descriptor = os.dup(self.dir_fd)
             try:
-                descriptor = os.open(name, flags, dir_fd=self.dir_fd)
+                current_path = self.path
+                checks: list[tuple[Path, _PathIdentity]] = [
+                    (current_path, self.expected)
+                ]
+                flags = (
+                    os.O_RDONLY
+                    | os.O_DIRECTORY
+                    | os.O_NOFOLLOW
+                    | getattr(os, "O_CLOEXEC", 0)
+                )
+                for part in parts:
+                    try:
+                        next_descriptor = os.open(
+                            part,
+                            flags,
+                            dir_fd=descriptor,
+                        )
+                    except FileNotFoundError:
+                        if not create:
+                            raise
+                        try:
+                            os.mkdir(part, mode=0o700, dir_fd=descriptor)
+                        except FileExistsError:
+                            pass
+                        try:
+                            next_descriptor = os.open(
+                                part,
+                                flags,
+                                dir_fd=descriptor,
+                            )
+                        except OSError as exc:
+                            raise ContentPathError(
+                                "content output parent changed while it was being created"
+                            ) from exc
+                    except OSError as exc:
+                        raise ContentPathError(
+                            "content output parent is not a safe directory"
+                        ) from exc
+                    next_status = os.fstat(next_descriptor)
+                    if not stat.S_ISDIR(next_status.st_mode):
+                        os.close(next_descriptor)
+                        raise ContentPathError(
+                            "content output parent is not a directory"
+                        )
+                    os.close(descriptor)
+                    descriptor = next_descriptor
+                    current_path = current_path / part
+                    checks.append(
+                        (
+                            current_path,
+                            _PathIdentity(next_status.st_dev, next_status.st_ino),
+                        )
+                    )
+                yield _BoundParent(
+                    dir_fd=descriptor,
+                    path=None,
+                    checks=tuple(checks),
+                )
+            finally:
+                os.close(descriptor)
+            return
+
+        if self.windows_handle is not None:
+            if self.bound_path is None:  # pragma: no cover - guarded by __enter__
+                raise RuntimeError("content directory has no bound Windows path")
+            current_path = self.bound_path
+            handles: list[int] = []
+            try:
+                for part in parts:
+                    candidate = current_path / part
+                    expected = _ensure_child_directory(candidate, create=create)
+                    handle, current_path = _open_windows_directory(
+                        candidate,
+                        expected,
+                    )
+                    handles.append(handle)
+                yield _BoundParent(dir_fd=None, path=current_path)
+            finally:
+                for handle in reversed(handles):
+                    _close_windows_directory(handle)
+            return
+
+        if self.bound_path is None:
+            raise RuntimeError("content directory must be entered before use")
+        current_path = self.bound_path
+        checks: list[tuple[Path, _PathIdentity]] = [
+            (current_path, self.expected)
+        ]
+        for part in parts:
+            current_path = current_path / part
+            expected = _ensure_child_directory(current_path, create=create)
+            checks.append((current_path, expected))
+        parent = _BoundParent(
+            dir_fd=None,
+            path=current_path,
+            checks=tuple(checks),
+        )
+        parent.validate()
+        yield parent
+
+    @contextmanager
+    def open_binary(
+        self,
+        relative_path: str | Path,
+        expected: _PathIdentity | None = None,
+    ) -> Iterator[BinaryIO]:
+        parts = _relative_parts(relative_path)
+        descriptor = -1
+        with self._open_parent(parts[:-1], create=False) as parent:
+            parent.validate()
+            flags = (
+                os.O_RDONLY
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_BINARY", 0)
+                | getattr(os, "O_NOINHERIT", 0)
+            )
+            file_path: Path | None = None
+            try:
+                if parent.dir_fd is not None:
+                    descriptor = os.open(
+                        parts[-1],
+                        flags,
+                        dir_fd=parent.dir_fd,
+                    )
+                else:
+                    if parent.path is None:  # pragma: no cover - internal invariant
+                        raise RuntimeError("content output parent is unavailable")
+                    file_path = parent.path / parts[-1]
+                    before = file_path.stat(follow_symlinks=False)
+                    if not stat.S_ISREG(before.st_mode):
+                        raise ContentPathError(
+                            "content file is not a regular file"
+                        )
+                    descriptor = os.open(file_path, flags)
+            except FileNotFoundError:
+                raise
+            except ContentPathError:
+                raise
             except OSError as exc:
                 raise ContentPathError(
-                    "article changed after path validation"
+                    "content file changed after path validation"
                 ) from exc
-        else:
-            flags |= getattr(os, "O_BINARY", 0) | getattr(os, "O_NOINHERIT", 0)
-            try:
-                descriptor = os.open(self.path / name, flags)
-            except OSError as exc:
+
+            status = os.fstat(descriptor)
+            if not stat.S_ISREG(status.st_mode) or (
+                expected is not None and not _matches_identity(status, expected)
+            ):
+                os.close(descriptor)
+                descriptor = -1
                 raise ContentPathError(
-                    "article changed after path validation"
-                ) from exc
+                    "content file changed after path validation"
+                )
+            if file_path is not None:
+                try:
+                    current = file_path.stat(follow_symlinks=False)
+                except OSError as exc:
+                    os.close(descriptor)
+                    descriptor = -1
+                    raise ContentPathError(
+                        "content file changed after path validation"
+                    ) from exc
+                if not stat.S_ISREG(current.st_mode) or not _matches_identity(
+                    current,
+                    _PathIdentity(status.st_dev, status.st_ino),
+                ):
+                    os.close(descriptor)
+                    descriptor = -1
+                    raise ContentPathError(
+                        "content file changed after path validation"
+                    )
+                parent.validate()
 
-        if not _matches_identity(os.fstat(descriptor), expected):
-            os.close(descriptor)
-            raise ContentPathError("article changed after path validation")
+            try:
+                source = os.fdopen(descriptor, mode="rb")
+            except BaseException:
+                os.close(descriptor)
+                descriptor = -1
+                raise
+            descriptor = -1
+            with source:
+                yield source
 
-        try:
-            source = os.fdopen(descriptor, mode="r", encoding="utf-8")
-        except BaseException:
-            os.close(descriptor)
-            raise
-        with source:
-            return source.read()
+    def read_text(
+        self,
+        name: str,
+        expected: _PathIdentity | None = None,
+    ) -> str:
+        with self.open_binary(name, expected) as source:
+            return source.read().decode("utf-8")
 
-    def atomic_write_text(self, name: str, content: str) -> None:
-        temporary_name = f".{name}.{uuid.uuid4().hex}.tmp"
+    def atomic_write(
+        self,
+        relative_path: str | Path,
+        writer: Callable[[BinaryIO], _T],
+    ) -> _T:
+        parts = _relative_parts(relative_path)
+        temporary_name = f".coworker-{uuid.uuid4().hex}.tmp"
         flags = (
             os.O_WRONLY
             | os.O_CREAT
@@ -349,61 +652,93 @@ class _BoundDirectory:
         )
         descriptor = -1
         created = False
-        try:
-            if self.dir_fd is not None:
-                descriptor = os.open(
-                    temporary_name,
-                    flags,
-                    0o600,
-                    dir_fd=self.dir_fd,
-                )
-            else:
-                descriptor = os.open(
-                    self.path / temporary_name,
-                    flags,
-                    0o600,
-                )
-            created = True
+        with self._open_parent(parts[:-1], create=True) as parent:
             try:
-                destination = os.fdopen(
-                    descriptor,
-                    mode="w",
-                    encoding="utf-8",
-                    newline="\n",
-                )
-            except BaseException:
-                os.close(descriptor)
-                descriptor = -1
-                raise
-            descriptor = -1
-            with destination:
-                destination.write(content)
-
-            if self.dir_fd is not None:
-                os.replace(
-                    temporary_name,
-                    name,
-                    src_dir_fd=self.dir_fd,
-                    dst_dir_fd=self.dir_fd,
-                )
-            else:
-                os.replace(
-                    self.path / temporary_name,
-                    self.path / name,
-                )
-            created = False
-        except BaseException:
-            if descriptor >= 0:
-                os.close(descriptor)
-            if created:
+                parent.validate()
+                if parent.dir_fd is not None:
+                    descriptor = os.open(
+                        temporary_name,
+                        flags,
+                        0o600,
+                        dir_fd=parent.dir_fd,
+                    )
+                else:
+                    if parent.path is None:  # pragma: no cover - internal invariant
+                        raise RuntimeError("content output parent is unavailable")
+                    descriptor = os.open(
+                        parent.path / temporary_name,
+                        flags,
+                        0o600,
+                    )
+                created = True
                 try:
-                    if self.dir_fd is not None:
-                        os.unlink(temporary_name, dir_fd=self.dir_fd)
-                    else:
-                        (self.path / temporary_name).unlink(missing_ok=True)
-                except OSError:
-                    pass
-            raise
+                    destination = os.fdopen(descriptor, mode="wb")
+                except BaseException:
+                    os.close(descriptor)
+                    descriptor = -1
+                    raise
+                descriptor = -1
+                with destination:
+                    result = writer(destination)
+                    destination.flush()
+                    os.fsync(destination.fileno())
+
+                parent.validate()
+                if parent.dir_fd is not None:
+                    os.replace(
+                        temporary_name,
+                        parts[-1],
+                        src_dir_fd=parent.dir_fd,
+                        dst_dir_fd=parent.dir_fd,
+                    )
+                else:
+                    if parent.path is None:  # pragma: no cover - internal invariant
+                        raise RuntimeError("content output parent is unavailable")
+                    os.replace(
+                        parent.path / temporary_name,
+                        parent.path / parts[-1],
+                    )
+                created = False
+                return result
+            except BaseException:
+                if descriptor >= 0:
+                    os.close(descriptor)
+                if created:
+                    try:
+                        if parent.dir_fd is not None:
+                            os.unlink(temporary_name, dir_fd=parent.dir_fd)
+                        elif parent.path is not None:
+                            (parent.path / temporary_name).unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                raise
+
+    def atomic_write_text(self, name: str, content: str) -> None:
+        encoded = content.encode("utf-8")
+        self.atomic_write(name, lambda destination: destination.write(encoded))
+
+    def unlink(self, relative_path: str | Path, *, missing_ok: bool = False) -> None:
+        parts = _relative_parts(relative_path)
+        try:
+            with self._open_parent(parts[:-1], create=False) as parent:
+                parent.validate()
+                if parent.dir_fd is not None:
+                    os.unlink(parts[-1], dir_fd=parent.dir_fd)
+                else:
+                    if parent.path is None:  # pragma: no cover - internal invariant
+                        raise RuntimeError("content output parent is unavailable")
+                    (parent.path / parts[-1]).unlink()
+        except FileNotFoundError:
+            if not missing_ok:
+                raise
+
+
+def bind_directory(path: str | Path) -> _BoundDirectory:
+    directory_path = Path(path)
+    return _BoundDirectory(
+        directory_path,
+        _snapshot_path(directory_path, directory=True),
+    )
 
 
 def _read_article_text(
@@ -446,7 +781,7 @@ def prepare_article_review_file(
             resolved_article_path.name,
             article_identity,
         )
-        article = _article_from_text(resolved_article_path, article_text)
+        article = parse_article_text(resolved_article_path, article_text)
         reviewed_hash = article_text_hash(article)
         rendered = _render_review_html(
             article.meta.title,

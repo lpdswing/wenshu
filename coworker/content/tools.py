@@ -1,19 +1,25 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 import hmac
 import json
 import os
+import stat
 import tempfile
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, BinaryIO
 
 import aisuite as ai
 
-from ..image_generation.base import ImageGenerationProvider, ImageRequest
-from .article import load_article
+from ..image_generation.base import (
+    ImageGenerationError,
+    ImageGenerationProvider,
+    ImageRequest,
+)
+from .article import parse_article_text
 from .hashing import article_text_hash
 from .images import (
     AssetManifest,
@@ -22,7 +28,7 @@ from .images import (
     parse_asset_plan,
 )
 from .paths import ContentPathError, resolve_in_roots
-from .review import prepare_article_review_file
+from .review import _BoundDirectory, bind_directory, prepare_article_review_file
 
 _MANIFEST_NAME = "assets.manifest.json"
 _MANIFEST_FIELDS = {"reviewed_hash", "plan_hash", "provider", "model", "assets"}
@@ -145,13 +151,15 @@ class ReviewChangedError(ValueError):
     """The current article no longer matches the hash returned for review."""
 
 
+class _AssetValidationError(ValueError):
+    """A provider result does not match the staged image request."""
+
+
 @dataclass(frozen=True)
 class _AssetTarget:
     output_path: str
     prompt: str
     aspect_ratio: str
-    logical_path: Path
-    resolved_path: Path
 
 
 ImageProviderFactory = Callable[[], ImageGenerationProvider]
@@ -216,87 +224,108 @@ class ContentTools:
             self.roots,
             must_exist=True,
         )
-        article = load_article(resolved_article_path)
-        current_hash = article_text_hash(article)
-        if not isinstance(reviewed_hash, str) or not hmac.compare_digest(
-            current_hash,
-            reviewed_hash,
-        ):
-            raise ReviewChangedError(
-                "article changed after review; reviewed_hash does not match the current article hash"
-            )
-
-        plan = parse_asset_plan(cover_request, illustration_plan)
-        plan_hash = _asset_plan_hash(plan)
         article_directory = resolved_article_path.parent
-        targets = _resolve_asset_targets(plan, article_directory, self.roots)
-        manifest_path = _validate_manifest_path(article_directory, self.roots)
+        directory_binding = bind_directory(article_directory)
 
-        manifest = _load_manifest(manifest_path)
-        if manifest is not None and _manifest_is_reusable(
-            manifest,
-            reviewed_hash=current_hash,
-            plan_hash=plan_hash,
-            targets=targets,
-            article_directory=article_directory,
-        ):
-            return _completed_result(manifest, reused=True)
-
-        provider = self._get_image_provider()
-        _discard_manifest(manifest_path)
-
-        generated: list[dict[str, str]] = []
-        provider_name: str | None = None
-        model_name: str | None = None
-        for index, target in enumerate(targets):
-            request = ImageRequest(
-                prompt=target.prompt,
-                output_path=target.resolved_path,
-                aspect_ratio=target.aspect_ratio,
-            )
-            try:
-                result = await provider.generate(request)
-                asset, result_provider, result_model = _validated_generated_asset(
-                    result,
-                    target,
-                    article_directory,
+        with directory_binding as directory:
+            article_text = directory.read_text(resolved_article_path.name)
+            article = parse_article_text(resolved_article_path, article_text)
+            current_hash = article_text_hash(article)
+            if not isinstance(reviewed_hash, str) or not hmac.compare_digest(
+                current_hash,
+                reviewed_hash,
+            ):
+                raise ReviewChangedError(
+                    "article changed after review; reviewed_hash does not match "
+                    "the current article hash"
                 )
-                if provider_name is None:
-                    provider_name = result_provider
-                    model_name = result_model
-                elif result_provider != provider_name or result_model != model_name:
-                    raise ValueError("image provider identity changed during the asset batch")
-            except Exception as exc:
-                return {
-                    "ok": False,
-                    "status": "partial",
-                    "reused": False,
-                    "reviewed_hash": current_hash,
-                    "plan_hash": plan_hash,
-                    "assets": generated,
-                    "failed_asset": {
-                        "output_path": target.output_path,
-                        "error_type": type(exc).__name__,
-                        "error": str(exc),
-                    },
-                    "pending_assets": [
-                        pending.output_path for pending in targets[index + 1 :]
-                    ],
-                }
-            generated.append(asset)
 
-        if provider_name is None or model_name is None:  # pragma: no cover - plans have a cover
-            raise RuntimeError("asset plan did not contain a cover request")
+            plan = parse_asset_plan(cover_request, illustration_plan)
+            plan_hash = _asset_plan_hash(plan)
+            targets = _resolve_asset_targets(plan, article_directory, self.roots)
+            _validate_manifest_path(article_directory, self.roots)
+            manifest = _load_manifest(directory)
+            if manifest is not None and _manifest_is_reusable(
+                manifest,
+                reviewed_hash=current_hash,
+                plan_hash=plan_hash,
+                targets=targets,
+                directory=directory,
+            ):
+                return _completed_result(manifest, reused=True)
 
-        manifest = AssetManifest(
-            reviewed_hash=current_hash,
-            plan_hash=plan_hash,
-            provider=provider_name,
-            model=model_name,
-            assets=tuple(generated),
-        )
-        _atomic_write_manifest(manifest_path, manifest)
-        return _completed_result(manifest, reused=False)
+            provider = self._get_image_provider()
+            _discard_manifest(directory)
+
+            generated: list[dict[str, str]] = []
+            provider_name: str | None = None
+            model_name: str | None = None
+            for index, target in enumerate(targets):
+                try:
+                    with tempfile.TemporaryDirectory(
+                        prefix="coworker-image-asset-"
+                    ) as staging_directory_name:
+                        staging_directory = Path(staging_directory_name).resolve(
+                            strict=True
+                        )
+                        if staging_directory.is_relative_to(article_directory):
+                            raise ContentPathError(
+                                "secure image staging is unavailable for this article directory"
+                            )
+                        staging_path = staging_directory / PurePosixPath(
+                            target.output_path
+                        ).name
+                        request = ImageRequest(
+                            prompt=target.prompt,
+                            output_path=staging_path,
+                            aspect_ratio=target.aspect_ratio,
+                        )
+                        result = await provider.generate(request)
+                        asset, result_provider, result_model = (
+                            _validated_generated_asset(
+                                result,
+                                target,
+                                directory,
+                                staging_path,
+                                provider_name,
+                                model_name,
+                            )
+                        )
+                        if provider_name is None:
+                            provider_name = result_provider
+                            model_name = result_model
+                except Exception as exc:
+                    error_type, error_message = _safe_asset_failure(exc)
+                    return {
+                        "ok": False,
+                        "status": "partial",
+                        "reused": False,
+                        "reviewed_hash": current_hash,
+                        "plan_hash": plan_hash,
+                        "assets": generated,
+                        "failed_asset": {
+                            "output_path": target.output_path,
+                            "error_type": error_type,
+                            "error": error_message,
+                        },
+                        "pending_assets": [
+                            pending.output_path for pending in targets[index + 1 :]
+                        ],
+                    }
+                generated.append(asset)
+
+            if provider_name is None or model_name is None:  # pragma: no cover
+                raise RuntimeError("asset plan did not contain a cover request")
+
+            manifest = AssetManifest(
+                reviewed_hash=current_hash,
+                plan_hash=plan_hash,
+                provider=provider_name,
+                model=model_name,
+                assets=tuple(generated),
+            )
+            _atomic_write_manifest(directory, manifest)
+            return _completed_result(manifest, reused=False)
 
     def _get_image_provider(self) -> ImageGenerationProvider:
         provider = self._resolved_provider
@@ -352,8 +381,6 @@ def _resolve_asset_targets(
                 output_path=item.output_path,
                 prompt=item.prompt,
                 aspect_ratio=item.aspect_ratio,
-                logical_path=logical_path,
-                resolved_path=resolved_path,
             )
         )
 
@@ -389,10 +416,17 @@ def _validate_manifest_path(
     return manifest_path
 
 
-def _load_manifest(path: Path) -> AssetManifest | None:
+def _load_manifest(directory: _BoundDirectory) -> AssetManifest | None:
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, IsADirectoryError, OSError, UnicodeError, json.JSONDecodeError):
+        raw = json.loads(directory.read_text(_MANIFEST_NAME))
+    except (
+        FileNotFoundError,
+        IsADirectoryError,
+        OSError,
+        UnicodeError,
+        json.JSONDecodeError,
+        ContentPathError,
+    ):
         return None
     if not isinstance(raw, Mapping) or set(raw) != _MANIFEST_FIELDS:
         return None
@@ -423,7 +457,7 @@ def _manifest_is_reusable(
     reviewed_hash: str,
     plan_hash: str,
     targets: tuple[_AssetTarget, ...],
-    article_directory: Path,
+    directory: _BoundDirectory,
 ) -> bool:
     if manifest.reviewed_hash != reviewed_hash or manifest.plan_hash != plan_hash:
         return False
@@ -434,49 +468,132 @@ def _manifest_is_reusable(
 
     for asset, target in zip(manifest.assets, targets, strict=True):
         try:
-            current_path = target.logical_path.resolve(strict=True)
-            if (
-                current_path != target.resolved_path
-                or not current_path.is_relative_to(article_directory)
-                or not current_path.is_file()
-            ):
-                return False
-            actual_hash = _sha256_file(current_path)
-        except OSError:
+            with directory.open_binary(target.output_path) as source:
+                actual_hash = _sha256_stream(source)
+        except (FileNotFoundError, OSError, ContentPathError):
             return False
         if not hmac.compare_digest(actual_hash, asset["sha256"]):
             return False
     return True
 
 
+def _safe_asset_failure(exc: Exception) -> tuple[str, str]:
+    if isinstance(exc, ImageGenerationError):
+        return type(exc).__name__, str(exc)
+    if isinstance(exc, _AssetValidationError):
+        return "ValueError", str(exc)
+    if isinstance(exc, ContentPathError):
+        return type(exc).__name__, "asset output path changed after validation"
+    return "ImageGenerationError", "image generation failed"
+
+
+@contextmanager
+def _open_staged_output(path: Path) -> Iterator[BinaryIO]:
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_BINARY", 0)
+        | getattr(os, "O_NOINHERIT", 0)
+    )
+    descriptor = -1
+    try:
+        try:
+            descriptor = os.open(path, flags)
+            status = os.fstat(descriptor)
+            current = path.stat(follow_symlinks=False)
+            if (
+                not stat.S_ISREG(status.st_mode)
+                or not stat.S_ISREG(current.st_mode)
+                or (status.st_dev, status.st_ino)
+                != (current.st_dev, current.st_ino)
+            ):
+                raise _AssetValidationError(
+                    "image provider did not create a regular staging file"
+                )
+            source = os.fdopen(descriptor, mode="rb")
+            descriptor = -1
+        except _AssetValidationError:
+            raise
+        except (OSError, TypeError) as exc:
+            raise _AssetValidationError(
+                "image provider did not create a readable staging file"
+            ) from exc
+
+        with source:
+            yield source
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _copy_staged_output(
+    source: BinaryIO,
+    destination: BinaryIO,
+    claimed_hash: str,
+) -> str:
+    digest = hashlib.sha256()
+    for chunk in iter(lambda: source.read(1024 * 1024), b""):
+        digest.update(chunk)
+        destination.write(chunk)
+    actual_hash = digest.hexdigest()
+    if not hmac.compare_digest(actual_hash, claimed_hash):
+        raise _AssetValidationError(
+            "image provider returned a sha256 that does not match its output"
+        )
+    return actual_hash
+
+
 def _validated_generated_asset(
     result: Any,
     target: _AssetTarget,
-    article_directory: Path,
+    directory: _BoundDirectory,
+    staging_path: Path,
+    expected_provider: str | None,
+    expected_model: str | None,
 ) -> tuple[dict[str, str], str, str]:
-    current_path = target.resolved_path.resolve(strict=True)
-    if not current_path.is_relative_to(article_directory) or not current_path.is_file():
-        raise ValueError("image provider did not create a regular file inside the article directory")
+    try:
+        requested_path = staging_path.resolve(strict=True)
+        result_path = Path(result.path).resolve(strict=True)
+    except (AttributeError, OSError, RuntimeError, TypeError) as exc:
+        raise _AssetValidationError(
+            "image provider did not return its requested staging path"
+        ) from exc
+    if result_path != requested_path:
+        raise _AssetValidationError(
+            "image provider returned a different output path"
+        )
 
-    result_path = Path(result.path).resolve(strict=True)
-    if result_path != current_path:
-        raise ValueError("image provider returned a different output path")
-
-    actual_hash = _sha256_file(current_path)
     claimed_hash = getattr(result, "sha256", None)
-    if not isinstance(claimed_hash, str) or not hmac.compare_digest(
-        actual_hash,
-        claimed_hash,
-    ):
-        raise ValueError("image provider returned a sha256 that does not match its output")
+    if not isinstance(claimed_hash, str):
+        raise _AssetValidationError("image provider returned an invalid sha256")
 
     provider = getattr(result, "provider", None)
     model = getattr(result, "model", None)
     if not isinstance(provider, str) or not provider.strip():
-        raise ValueError("image provider returned an invalid provider name")
+        raise _AssetValidationError(
+            "image provider returned an invalid provider name"
+        )
     if not isinstance(model, str) or not model.strip():
-        raise ValueError("image provider returned an invalid image identifier")
+        raise _AssetValidationError(
+            "image provider returned an invalid image identifier"
+        )
+    if expected_provider is not None and (
+        provider != expected_provider or model != expected_model
+    ):
+        raise _AssetValidationError(
+            "image provider identity changed during the asset batch"
+        )
 
+    with _open_staged_output(staging_path) as source:
+        actual_hash = directory.atomic_write(
+            target.output_path,
+            lambda destination: _copy_staged_output(
+                source,
+                destination,
+                claimed_hash,
+            ),
+        )
     return (
         {"output_path": target.output_path, "sha256": actual_hash},
         provider,
@@ -484,22 +601,21 @@ def _validated_generated_asset(
     )
 
 
-def _sha256_file(path: Path) -> str:
+def _sha256_stream(source: BinaryIO) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
+    for chunk in iter(lambda: source.read(1024 * 1024), b""):
+        digest.update(chunk)
     return digest.hexdigest()
 
 
-def _discard_manifest(path: Path) -> None:
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        pass
+def _discard_manifest(directory: _BoundDirectory) -> None:
+    directory.unlink(_MANIFEST_NAME, missing_ok=True)
 
 
-def _atomic_write_manifest(path: Path, manifest: AssetManifest) -> None:
+def _atomic_write_manifest(
+    directory: _BoundDirectory,
+    manifest: AssetManifest,
+) -> None:
     payload = json.dumps(
         {
             "reviewed_hash": manifest.reviewed_hash,
@@ -512,30 +628,7 @@ def _atomic_write_manifest(path: Path, manifest: AssetManifest) -> None:
         sort_keys=True,
         separators=(",", ":"),
     ) + "\n"
-
-    temporary_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            newline="\n",
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            dir=path.parent,
-            delete=False,
-        ) as handle:
-            temporary_path = Path(handle.name)
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary_path, path)
-        temporary_path = None
-    finally:
-        if temporary_path is not None:
-            try:
-                temporary_path.unlink()
-            except FileNotFoundError:
-                pass
+    directory.atomic_write_text(_MANIFEST_NAME, payload)
 
 
 def _completed_result(manifest: AssetManifest, *, reused: bool) -> dict[str, Any]:

@@ -104,7 +104,9 @@ def _optional_string(meta: Mapping[str, Any], key: str, default: str | None) -> 
     return normalized
 
 
-def _article_from_text(article_path: Path, text: str) -> ArticleDocument:
+def parse_article_text(article_path: str | Path, text: str) -> ArticleDocument:
+    """Parse already-read article text while preserving its logical source path."""
+    article_path = Path(article_path)
     raw_frontmatter, raw_body = _split_frontmatter(text)
     _reject_additional_yaml_document(raw_body)
     meta = _load_mapping(raw_frontmatter)
@@ -122,7 +124,7 @@ def _article_from_text(article_path: Path, text: str) -> ArticleDocument:
 
 def load_article(path: str | Path) -> ArticleDocument:
     article_path = Path(path)
-    return _article_from_text(
+    return parse_article_text(
         article_path,
         article_path.read_text(encoding="utf-8"),
     )

@@ -115,6 +115,37 @@ def test_tool_turn_order_and_execution(tmp_path):
     )
 
 
+def test_async_tool_is_awaited_before_recording_result(tmp_path):
+    async def async_echo(value: str) -> dict[str, str]:
+        await asyncio.sleep(0)
+        return {"echo": value}
+
+    engine, _ = _engine(
+        tmp_path,
+        [_tool_turn("async_echo", {"value": "awaited"}), _text_turn("done")],
+    )
+    engine.registry.register(
+        async_echo,
+        metadata=ai.ToolMetadata(
+            name="async_echo",
+            category="test",
+            risk_level="low",
+            capabilities=["test"],
+            requires_approval=False,
+        ),
+    )
+
+    events = _collect(engine, "run async tool")
+
+    finished = next(e for e in events if e.type == EventType.TOOL_FINISHED)
+    assert finished.data["status"] == "ok"
+    assert any(
+        message.get("role") == "tool" and "awaited" in message["content"]
+        for message in engine.messages
+    )
+    assert all("coroutine object" not in message["content"] for message in engine.messages)
+
+
 def test_write_requires_approval_then_approved(tmp_path):
     async def approve_once(_req: PermissionRequest):
         return ApprovalOutcome.ONCE
