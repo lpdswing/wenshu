@@ -538,7 +538,7 @@ class TurnEngine:
             display_fields = callback(dict(arguments))
             if not isinstance(display_fields, Mapping):
                 return None
-            return {**arguments, **dict(display_fields)}
+            return dict(display_fields)
         except Exception:
             return None
 

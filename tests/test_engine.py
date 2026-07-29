@@ -251,7 +251,7 @@ def test_approval_arguments_are_display_only(tmp_path):
 
     events = _collect(engine, "generate article images")
 
-    expected_display = {**original_arguments, **display_fields}
+    expected_display = display_fields
     permission = next(
         event for event in events if event.type is EventType.PERMISSION_REQUIRED
     )
@@ -259,6 +259,9 @@ def test_approval_arguments_are_display_only(tmp_path):
     assert summarized == [original_arguments]
     assert requests[0].arguments == original_arguments
     assert requests[0].display_arguments == expected_display
+    assert "reviewed_hash" not in requests[0].display_arguments
+    assert "cover_request" not in requests[0].display_arguments
+    assert "illustration_plan" not in requests[0].display_arguments
     assert executed == [original_arguments]
     assert set(spec.schema["function"]["parameters"]["properties"]) == set(
         original_arguments
