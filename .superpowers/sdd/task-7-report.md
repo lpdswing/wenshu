@@ -1,8 +1,8 @@
-# Task 7：全量验收与交付报告
+# 文枢 0.1 全量验收与交付报告
 
 ## 结论
 
-文枢 0.1 产品壳计划的 7 个任务均已完成。全量 Python、前端 build、Vitest、Playwright 和 Rust `cargo check` 通过；真实浏览器 smoke 验证默认文枢 profile 不请求上游 Cloud、Gallery、Relay、managed OAuth 或 updater。未 push。
+文枢 0.1 产品壳、原生文章流水线、图片生成与微信公众号草稿连接器均已完成。全量 Python、前端 build、Vitest、Playwright 和 Rust `cargo check` 通过；真实浏览器 smoke 验证默认文枢 profile 不请求上游 Cloud、Gallery、Relay、managed OAuth 或 updater。最终 Standards 与 Spec 双轴复审均为零发现。未 push。
 
 ## 交付范围
 
@@ -13,6 +13,9 @@
 5. 桌面壳、Tauri 元数据、安装包名、产品可见路径与 scratch 默认值完成文枢切换；保留既有 `~/OpenWorker` 数据目录兼容。
 6. 核心工作路径中文化；内部协议、event/API key、tool 名、connector/provider/model 名保持稳定。
 7. legacy OpenWorker 测试通过显式 permissive test profile 隔离，不放宽生产 `WENSHU_PROFILE`。
+8. 原生文章模型、Markdown 渲染、内容审阅、配图规划和图片生成形成可审阅、可恢复的本地流水线。
+9. 微信公众号连接器完成凭据校验、预览 hash、图片上传、草稿创建、幂等 receipt、错误脱敏与 fail-closed 分类。
+10. `generate_article_assets` 与 `create_wechat_draft` 强制单次人工审批；auto 模式、持久授权和隐藏 connector 的 REST/MCP 写路径均不能绕过产品与审批门禁。
 
 ## 全量验证
 
@@ -22,9 +25,7 @@
 .venv/bin/pytest -q
 ```
 
-结果：`964 passed, 1 skipped, 1 warning`。
-
-唯一 warning 是既有 FastAPI TestClient 对 `httpx` 的 `StarletteDeprecationWarning`。
+结果：`1269 passed, 1 skipped`。
 
 ### 前端
 
@@ -38,9 +39,9 @@ npx playwright test
 结果：
 
 - Vite production build：PASS。
-- Vitest：`16 passed` files，`77 passed` tests。
-- Playwright：`155 passed`，六 workers，无 retry。
-- Playwright 稳定性复验：早期 154-test 集合以两 workers、`--retries=0` 全绿；新增文枢来源 gate 后最终集合 155 全绿。
+- Vitest：`17 passed` files，`94 passed` tests。
+- Playwright：`162 passed`，两 workers，无 retry。
+- 公众号草稿、一次性审批、默认 Persona、产品来源 allowlist 和 MCP/manual connector 写门禁均有 focused 回归。
 
 全量并发下 Vite dev server 曾随机留下半启动页面；同一集合在 production preview 下连续干净通过。`playwright.config.ts` 因而让普通验收使用 fresh build + preview，`--ui` 继续使用 dev server/HMR。
 
@@ -65,14 +66,16 @@ cargo check
 - 未访问 `api.openworker.com`、Cloud OAuth、Gallery、Relay 或 updater 地址。
 - 页面截图保存在工作站临时路径 `/tmp/wenshu-shell-card.png`。
 
-## 终审修复
+## 最终双轴复审
 
-最终审查定位并修复两个 Important：
+固定点 `ae8f4c5` 到最终 HEAD 经 Standards 与 Spec 并行审查。首轮发现的审批绕过、HTTP 5xx 结果分类、Persona 指令缺口、通用 `generate_image` 暴露、`default_persona` 未消费、一次性审批 UI 和 README 标准问题均在 `96b7953` 关闭。
 
-1. `4ac0c1b`：产品 allowlist 前移到 gateway settings/profile 读取，并覆盖入站分发、effective connectors、Persona/Session views/recommends 与连接写路径；遗留隐藏凭据保留但不可见、不可启用、不可收消息。
-2. `381549b`：新会话来源卡由产品过滤后的 Connector catalog 驱动；文枢不再显示 HubSpot/GitHub/Slack，legacy OpenWorker 保留原 setup flow。
+复审又定位并关闭两个收口问题：
 
-两项 focused 复审均 Approved，无剩余 Critical/Important。
+1. `2602899` 将微信异常 taxonomy 集中到 `errors.wechat_failure_kind()`；`ReceiptStoreError` 在 draft/tool 两条路径统一为 `receipt_invalid`。
+2. `2602899` 在 manual REST、MCP REST 与 manager 三条 connector 启用路径上前置 `ProductProfile.visible_connectors` 门禁，验证、OAuth、global MCP config 和 secret write 前即 fail closed。
+
+最终 Standards 与 Spec reviewer 对增量及当前实现均报告零个 Critical、Important 或 Minor finding。
 
 ## 测试夹具修复原则
 
