@@ -14,6 +14,7 @@ test("monday: one-click MCP connect without cloud sign-in; card flips connected"
   page,
 }) => {
   await openConnectors(page);
+  await page.getByRole("button", { name: "show all" }).click();
 
   // Signed OUT (fixtures default) — the MCP one-click needs no OpenWorker account.
   await page
@@ -62,6 +63,7 @@ test("monday detail page shows the pinned tool subset with approval badges", asy
   page,
 }) => {
   await openConnectors(page);
+  await page.getByRole("button", { name: "show all" }).click();
   await page.getByTestId("connector-monday").click();
   await expect(page.getByText("2 tools this connector adds")).toBeVisible();
   await page.getByText("View", { exact: true }).click();
