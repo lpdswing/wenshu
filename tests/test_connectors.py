@@ -686,6 +686,140 @@ def test_connectors_rest(tmp_path, monkeypatch):
     ]["connected"] is False
 
 
+def test_wechat_descriptor_is_available_and_outbound_only():
+    from coworker.connectors.descriptors import get_descriptor
+
+    descriptor = get_descriptor("wechat_official")
+
+    assert descriptor is not None
+    assert descriptor.title == "微信公众号"
+    assert [field.key for field in descriptor.fields] == ["app_id", "app_secret"]
+    assert descriptor.fields[0].secret is False
+    assert descriptor.fields[1].secret is True
+    assert descriptor.two_way is False
+    assert descriptor.channels is False
+    assert descriptor.brand_color == "#07C160"
+    assert descriptor.logo == "wechat"
+    assert descriptor.account_field == "@identity"
+
+
+def test_wechat_connect_validates_and_initializes_secret_row(tmp_path, monkeypatch):
+    from coworker.connectors import connect_connector, connector_list
+    from coworker.connectors.wechat.client import WeChatClient
+
+    closed = []
+    original_close = WeChatClient.close
+    monkeypatch.setattr(WeChatClient, "get_access_token", lambda self: "ACCESS")
+
+    def close(client):
+        closed.append(client)
+        original_close(client)
+
+    monkeypatch.setattr(WeChatClient, "close", close)
+    secrets = SecretStore(tmp_path / "secrets.json")
+
+    result = connect_connector(
+        secrets,
+        "wechat_official",
+        {"app_id": "wx-public-id", "app_secret": "super-secret"},
+    )
+
+    assert result == {"ok": True, "identity": "wx-public-id"}
+    assert len(closed) == 1
+    assert secrets.get("wechat_official:default") == {
+        "type": "token",
+        "enabled": True,
+        "app_id": "wx-public-id",
+        "app_secret": "super-secret",
+        "identity": "wx-public-id",
+        "need_open_comment": False,
+        "only_fans_can_comment": False,
+    }
+    status = {
+        row["name"]: row for row in connector_list(secrets)
+    }["wechat_official"]
+    assert status["connected"] is True
+    assert status["identity"] == "wx-public-id"
+    assert status["configured_fields"] == ["app_id", "app_secret"]
+    assert "account" not in status
+    assert "super-secret" not in repr(status)
+
+
+def test_wechat_validation_failure_does_not_persist_credentials(tmp_path, monkeypatch):
+    from coworker.connectors import connect_connector
+    from coworker.connectors.wechat.client import WeChatClient
+    from coworker.connectors.wechat.errors import classify_wechat_error
+
+    closed = []
+    original_close = WeChatClient.close
+
+    def fail(_client):
+        raise classify_wechat_error(40013, "invalid appid")
+
+    def close(client):
+        closed.append(client)
+        original_close(client)
+
+    monkeypatch.setattr(WeChatClient, "get_access_token", fail)
+    monkeypatch.setattr(WeChatClient, "close", close)
+    secrets = SecretStore(tmp_path / "secrets.json")
+
+    result = connect_connector(
+        secrets,
+        "wechat_official",
+        {"app_id": "wx-public-id", "app_secret": "must-not-leak"},
+    )
+
+    assert result["ok"] is False
+    assert "凭据" in result["error"]
+    assert "must-not-leak" not in repr(result)
+    assert secrets.get("wechat_official:default") is None
+    assert len(closed) == 1
+
+
+def test_wechat_validation_errors_are_chinese_secret_safe_and_close(monkeypatch):
+    from coworker.connectors.descriptors import get_descriptor
+    from coworker.connectors.wechat.client import WeChatClient
+    from coworker.connectors.wechat.errors import (
+        WeChatHTTPError,
+        WeChatTransportError,
+        classify_wechat_error,
+    )
+
+    cases = [
+        (classify_wechat_error(40013, "bad appid"), "凭据"),
+        (classify_wechat_error(40125, "bad secret"), "凭据"),
+        (classify_wechat_error(40164, "secret=must-not-leak"), "IP"),
+        (classify_wechat_error(48001, "denied"), "权限"),
+        (classify_wechat_error(45009, "busy"), "频繁"),
+        (WeChatHTTPError(429), "频繁"),
+        (WeChatTransportError(), "网络"),
+    ]
+    closed = []
+    original_close = WeChatClient.close
+
+    def close(client):
+        closed.append(client)
+        original_close(client)
+
+    monkeypatch.setattr(WeChatClient, "close", close)
+    validator = get_descriptor("wechat_official").validate
+    assert validator is not None
+
+    for index, (error, expected) in enumerate(cases, start=1):
+        def fail(_client, raised=error):
+            raise raised
+
+        monkeypatch.setattr(WeChatClient, "get_access_token", fail)
+        result = validator(
+            {"app_id": "wx-public-id", "app_secret": "must-not-leak"}
+        )
+        assert result.ok is False
+        assert expected in result.error
+        assert "must-not-leak" not in result.error
+        assert len(closed) == index
+
+
 # -- inbound: event mappers ----------------------------------------------------
 def test_telegram_message_mapper():
     from types import SimpleNamespace

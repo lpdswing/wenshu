@@ -30,6 +30,8 @@ ABOUT: dict[str, str] = {
     "browser": "A built-in browser agents drive to read pages and act on "
     "websites — separate from your personal browser, with actions subject to "
     "approval.",
+    "wechat_official": "将已确认的图文保存到已连接微信公众号的草稿箱，"
+    "供你在公众平台内继续检查和发布。",
     "github": "Work with issues, pull requests, repository files, and CI "
     "status. One click installs the OpenWorker GitHub App on the repositories "
     "you pick; mention the agent on an issue or PR and it answers from your "
@@ -88,6 +90,10 @@ ACCESS: dict[str, list[str]] = {
         "Opens and reads web pages in its own browser session.",
         "Clicks, types, and uploads files only inside that session.",
         "Never touches your personal browser or its logins.",
+    ],
+    "wechat_official": [
+        "只把已确认的图文保存到公众号草稿箱。",
+        "不会发布、群发或读取公众号消息。",
     ],
     "github": [
         "Reads code, issues, pull requests, and CI on repositories you grant.",

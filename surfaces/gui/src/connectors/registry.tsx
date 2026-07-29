@@ -39,6 +39,7 @@ import {
   siStripe,
   siTelegram,
   siWhatsapp,
+  siWechat,
   siZendesk,
 } from "simple-icons";
 
@@ -216,6 +217,7 @@ export const CONNECTORS: Record<string, ConnectorRegistryEntry> = {
   stripe: brand(siStripe),
   telegram: brand(siTelegram),
   whatsapp: brand(siWhatsapp),
+  wechat: brand(siWechat),
   zendesk: brand(siZendesk),
   // Real brand marks vendored from simple-icons v9.
   slack: { label: "Slack", logo: pathLogo(SLACK_PATH) },

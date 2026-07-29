@@ -202,6 +202,7 @@ const SLACK_SESSION = {
 const CONNECTORS = {
   connectors: [
     { name: "browser", title: "Browser", icon: "B", blurb: "Headless browser.", auth: "none", two_way: false, channels: false, available: true, brand_color: "#6b7280", logo: "", fields: [], instructions: [], connected: true, account: null, enabled: true, allowed_users: [], tools: [], managed: false, managed_profile: false },
+    { name: "wechat_official", title: "微信公众号", icon: "微", blurb: "将已确认的图文保存到公众号草稿箱。", about: "把文枢中已确认的图文保存到公众号草稿箱。", access: ["保存图文到草稿箱。", "不会自动发表、群发或删除内容。"], auth: "api_token", two_way: false, channels: false, available: true, brand_color: "#07C160", logo: "wechat", fields: [{ key: "app_id", label: "AppID", secret: false, required: true, help: "", placeholder: "wx…" }, { key: "app_secret", label: "AppSecret", secret: true, required: true, help: "", placeholder: "" }], instructions: ["登录微信公众平台，在开发 → 基本配置中查看 AppID 和 AppSecret。", "将当前出口 IP 加入公众号 IP 白名单。"], connected: false, identity: null, configured_fields: [], enabled: false, allowed_users: [], tools: [], managed: false, managed_profile: false },
     { name: "telegram", title: "Telegram", icon: "T", blurb: "Two-way Telegram messaging.", auth: "bot_token", two_way: true, channels: true, available: true, brand_color: "#229ed9", logo: "telegram", fields: [{ key: "bot_token", label: "Bot token", secret: true, required: true, help: "", placeholder: "123456:ABC…" }], instructions: [], connected: false, account: null, enabled: false, allowed_users: [], tools: [], managed: false, managed_profile: false },
     // Managed-capable connector (one-click via cloud when signed in; manual paste otherwise).
     // Carries pre-connect detail copy (§38): about + access + tools drive available-detail.spec.ts.
@@ -488,6 +489,27 @@ export async function mockApi(
     installations: githubState.installations.map((i) => ({ ...i, allowed_users: [...i.allowed_users] })),
     unauthorized: githubParked.map((x) => ({ ...x })),
   });
+  // WeChat Official Account — only the identity and configured field names ever
+  // leave the fixture. The submitted AppSecret is deliberately never stored.
+  const wechatState = {
+    connected: false,
+    identity: null as string | null,
+    configured_fields: [] as string[],
+    settings: {
+      need_open_comment: false,
+      only_fans_can_comment: false,
+    },
+  };
+  const wechatConnector = () => {
+    const base = CONNECTORS.connectors.find((c) => c.name === "wechat_official");
+    return {
+      ...base,
+      connected: wechatState.connected,
+      enabled: wechatState.connected,
+      identity: wechatState.identity,
+      configured_fields: [...wechatState.configured_fields],
+    };
+  };
   // Gmail — PER-TEST multi-account state (starts disconnected; managed connects add
   // mailboxes instantly, mirroring the backend's gmail:account:<email> profiles).
   // NOTE: the real server currently sends managed_paused: true for the Google trio
@@ -1280,24 +1302,80 @@ export async function mockApi(
         hubspotState.hidden_fields = b.hidden_fields.map((f: string) => f.trim().toLowerCase());
       return json({ ok: true, hidden_fields: [...hubspotState.hidden_fields] });
     }
+    if (p.endsWith("/v1/connectors/wechat_official/settings")) {
+      if (!wechatState.connected)
+        return json({ detail: "微信公众号尚未连接" }, 409);
+      if (m === "PATCH") {
+        const body = req.postDataJSON() || {};
+        const keys = Object.keys(body);
+        if (
+          keys.some(
+            (key) =>
+              key !== "need_open_comment" && key !== "only_fans_can_comment",
+          ) ||
+          keys.length !== 2 ||
+          typeof body.need_open_comment !== "boolean" ||
+          typeof body.only_fans_can_comment !== "boolean"
+        )
+          return json({ detail: "评论设置必须是布尔值" }, 400);
+        wechatState.settings = {
+          need_open_comment: body.need_open_comment,
+          only_fans_can_comment:
+            body.need_open_comment && body.only_fans_can_comment,
+        };
+      }
+      return json({ ...wechatState.settings });
+    }
+    if (p.endsWith("/v1/connectors/wechat_official/connect") && m === "POST") {
+      const body = req.postDataJSON() || {};
+      const fields = body.fields || {};
+      if (
+        Object.keys(fields).length !== 2 ||
+        typeof fields.app_id !== "string" ||
+        !fields.app_id ||
+        typeof fields.app_secret !== "string" ||
+        !fields.app_secret
+      )
+        return json({ ok: false, error: "AppID 和 AppSecret 均为必填项" }, 400);
+      wechatState.connected = true;
+      wechatState.identity = fields.app_id;
+      wechatState.configured_fields = ["app_id", "app_secret"];
+      wechatState.settings = {
+        need_open_comment: false,
+        only_fans_can_comment: false,
+      };
+      return json({ ok: true, identity: fields.app_id });
+    }
+    if (p.endsWith("/v1/connectors/wechat_official/disconnect") && m === "POST") {
+      wechatState.connected = false;
+      wechatState.identity = null;
+      wechatState.configured_fields = [];
+      wechatState.settings = {
+        need_open_comment: false,
+        only_fans_can_comment: false,
+      };
+      return json({ ok: true });
+    }
     if (p.endsWith("/v1/connectors")) {
       const connectors = [
         slackConnector(),
         githubConnector(),
         ...CONNECTORS.connectors.map((c) =>
-          c.name === "gmail"
-            ? gmailConnector()
-            : c.name === "google_calendar"
-              ? gcalConnector()
-              : c.name === "hubspot"
-                ? hubspotConnector()
-                : c.name === "notion"
-                  ? notionConnector()
-                  : c.name === "outlook"
-                    ? outlookConnector()
-                    : c.name === "monday" || c.name === "jira"
-                      ? mcpConnector(c.name)
-                      : { ...c },
+          c.name === "wechat_official"
+            ? wechatConnector()
+            : c.name === "gmail"
+              ? gmailConnector()
+              : c.name === "google_calendar"
+                ? gcalConnector()
+                : c.name === "hubspot"
+                  ? hubspotConnector()
+                  : c.name === "notion"
+                    ? notionConnector()
+                    : c.name === "outlook"
+                      ? outlookConnector()
+                      : c.name === "monday" || c.name === "jira"
+                        ? mcpConnector(c.name)
+                        : { ...c },
         ),
       ];
       const visible = new Set(product.visible_connectors);

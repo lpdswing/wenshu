@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -754,6 +754,32 @@ def create_app(manager: SessionManager) -> FastAPI:
     @app.get("/v1/connectors")
     def connectors_list() -> dict[str, Any]:
         return {"connectors": manager.list_connectors()}
+
+    @app.get("/v1/connectors/wechat_official/settings")
+    def wechat_official_settings() -> Any:
+        try:
+            return manager.wechat_official_settings()
+        except LookupError as error:
+            return JSONResponse(
+                {"error": str(error)},
+                status_code=409,
+            )
+
+    @app.patch("/v1/connectors/wechat_official/settings")
+    def update_wechat_official_settings(body: Any = Body(default=None)) -> Any:
+        try:
+            return manager.update_wechat_official_settings(body)
+        except ValueError as error:
+            return JSONResponse(
+                {"error": str(error)},
+                status_code=400,
+            )
+        except LookupError as error:
+            return JSONResponse(
+                {"error": str(error)},
+                status_code=409,
+            )
+
 
     async def _refresh_listeners_if_two_way(name: str) -> None:
         # New/removed creds only take effect when the platform socket reconnects (Socket Mode

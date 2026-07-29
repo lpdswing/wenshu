@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -88,6 +89,10 @@ from ..sessions import SessionRecord
 from ..skills import SkillLoader
 
 _SCOPES = {s.value for s in Scope}
+_WECHAT_OFFICIAL_SETTINGS = frozenset(
+    {"need_open_comment", "only_fans_can_comment"}
+)
+_WECHAT_OFFICIAL_DISCONNECTED = "微信公众号尚未连接"
 
 logger = logging.getLogger("coworker.manager")
 
@@ -159,6 +164,9 @@ class SessionManager:
         self._autotitle_attempts: dict[str, int] = {}
         self.workspace_trust = WorkspaceTrustStore()
         self.secrets = SecretStore()
+        # Connector profile mutations are read/merge/write operations. Serialize them at
+        # the manager boundary while SecretStore keeps each file replacement atomic.
+        self._connector_lock = threading.Lock()
         # No explicit provider injected → route by the model's `provider:` prefix (OpenAI default,
         # Ollama, …). Tests inject a provider directly and bypass the router. The same router is
         # shared by every engine and the `/v1/chat/completions` proxy.
@@ -1232,18 +1240,91 @@ class SessionManager:
     def connect_connector(
         self, name: str, fields: dict[str, Any], *, acknowledged: bool = False
     ) -> dict[str, Any]:
-        # validates the token by a live API call (sync httpx) — run off the event loop
-        return connect_connector(self.secrets, name, fields, acknowledged=acknowledged)
+        # Validation does a blocking API call. The REST layer runs this method in a
+        # worker thread; serialize the following profile write with settings updates.
+        with self._connector_lock:
+            return connect_connector(
+                self.secrets, name, fields, acknowledged=acknowledged
+            )
 
     def set_experimental_connectors(self, value: bool) -> dict[str, Any]:
         return set_experimental_enabled(self.secrets, value)
+
+    def wechat_official_settings(self) -> dict[str, bool]:
+        with self._connector_lock:
+            profile = self._wechat_official_profile()
+            need_open_comment = (
+                profile.get("need_open_comment")
+                if type(profile.get("need_open_comment")) is bool
+                else False
+            )
+            only_fans_can_comment = (
+                profile.get("only_fans_can_comment")
+                if need_open_comment
+                and type(profile.get("only_fans_can_comment")) is bool
+                else False
+            )
+            return {
+                "need_open_comment": need_open_comment,
+                "only_fans_can_comment": only_fans_can_comment,
+            }
+
+    def update_wechat_official_settings(
+        self, changes: Any
+    ) -> dict[str, bool]:
+        if not isinstance(changes, dict):
+            raise ValueError("设置必须是 JSON 对象")
+        unknown = set(changes) - _WECHAT_OFFICIAL_SETTINGS
+        if unknown:
+            raise ValueError("只支持公众号评论设置")
+        if any(type(value) is not bool for value in changes.values()):
+            raise ValueError("公众号评论设置必须是布尔值")
+
+        with self._connector_lock:
+            profile = self._wechat_official_profile()
+            need_open_comment = (
+                profile.get("need_open_comment")
+                if type(profile.get("need_open_comment")) is bool
+                else False
+            )
+            only_fans_can_comment = (
+                profile.get("only_fans_can_comment")
+                if type(profile.get("only_fans_can_comment")) is bool
+                else False
+            )
+            need_open_comment = changes.get(
+                "need_open_comment", need_open_comment
+            )
+            only_fans_can_comment = changes.get(
+                "only_fans_can_comment", only_fans_can_comment
+            )
+            if not need_open_comment:
+                only_fans_can_comment = False
+            profile["need_open_comment"] = need_open_comment
+            profile["only_fans_can_comment"] = only_fans_can_comment
+            self.secrets.put("wechat_official:default", profile)
+            return {
+                "need_open_comment": need_open_comment,
+                "only_fans_can_comment": only_fans_can_comment,
+            }
+
+    def _wechat_official_profile(self) -> dict[str, Any]:
+        profile = self.secrets.get("wechat_official:default")
+        if not isinstance(profile, dict) or not all(
+            isinstance(profile.get(key), str) and bool(profile[key].strip())
+            for key in ("app_id", "app_secret")
+        ):
+            raise LookupError(_WECHAT_OFFICIAL_DISCONNECTED)
+        return profile
+
 
     def disconnect_connector(self, name: str) -> dict[str, Any]:
         # MCP-backed profile: drop the live server connection before the tokens go.
         conn = self.mcp._conns.get(name)
         if conn is not None:
             conn.shutdown.set()
-        return disconnect_connector(self.secrets, name)
+        with self._connector_lock:
+            return disconnect_connector(self.secrets, name)
 
     def update_connector_tools(
         self, name: str, enabled: dict[str, Any]

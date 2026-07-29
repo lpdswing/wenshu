@@ -98,6 +98,10 @@ def connector_list(
             "instructions": d.instructions,
             "connected": connected,
             "account": profile.get("account"),
+            "configured_fields": [
+                field.key for field in d.fields if bool(profile.get(field.key))
+            ],
+            "identity": profile.get("identity") or profile.get("account"),
             "enabled": bool(profile.get("enabled", True)) and connected,
             # The actual allow-list (the GUI manages it inline); was a bare count.
             "allowed_users": list(profile.get("allowed_users") or []),
@@ -114,6 +118,10 @@ def connector_list(
             # "relay" for the managed cloud path; empty for manual/token connect.
             "mode": profile.get("mode") or "",
         }
+        if d.name == "wechat_official":
+            # This connector's public account label has the explicit `identity`
+            # contract; keep the legacy `account` field off its status row.
+            entry.pop("account")
         if d.name == "slack":
             # Managed relay is multi-workspace: each `slack:team:*` profile is one
             # connected workspace with its OWN allow-list (ids are workspace-scoped).
@@ -159,7 +167,7 @@ def connector_list(
             if entry["installations"] and profile.get("mode") == "relay":
                 first = entry["installations"][0]
                 entry["account"] = entry["account"] or first["account_login"]
-        if d.account_field:
+        if d.account_field and d.name != "wechat_official":
             # Generic multi-account (batch-2 connectors): each
             # `<name>:account:*` profile is one account; :default is pointer-only.
             from . import accounts as _accounts
@@ -366,6 +374,8 @@ def connect_connector(
         if not result.ok:
             return {"ok": False, "error": result.error or "validation failed"}
         identity = result.identity
+    if name == "wechat_official" and identity is None:
+        identity = token_creds["app_id"]
 
     profile_type = (
         "oauth" if d.auth == "oauth" else "none" if d.auth == "none" else "token"
@@ -377,9 +387,21 @@ def connect_connector(
         # Re-pasting manual Socket Mode tokens must not erase the locally selected
         # approval owners.
         profile["approval_owner_ids"] = list(existing["approval_owner_ids"])
-    if identity:
+    if identity and name != "wechat_official":
         profile["account"] = identity
-    if d.account_field:
+    if name == "wechat_official":
+        profile["identity"] = identity
+        need_open_comment = existing.get("need_open_comment", False)
+        only_fans_can_comment = existing.get("only_fans_can_comment", False)
+        profile["need_open_comment"] = (
+            need_open_comment if type(need_open_comment) is bool else False
+        )
+        profile["only_fans_can_comment"] = (
+            only_fans_can_comment
+            if profile["need_open_comment"] and type(only_fans_can_comment) is bool
+            else False
+        )
+    if d.account_field and name != "wechat_official":
         # Account-patterned connector: connecting ADDS an account (a second
         # submit with different creds is a second account, not an overwrite).
         from . import accounts as _accounts
@@ -390,6 +412,8 @@ def connect_connector(
             return result
         return {"ok": True, "account": identity or account_id, "account_id": account_id}
     secrets.put(f"{name}:default", profile)
+    if name == "wechat_official":
+        return {"ok": True, "identity": identity}
     return {"ok": True, "account": identity}
 
 
