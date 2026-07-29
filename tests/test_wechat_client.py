@@ -447,3 +447,51 @@ def test_client_repr_and_lifecycle_are_secret_safe():
     with client as active:
         assert active is client
     assert client.is_closed
+
+
+@pytest.mark.parametrize(
+    ("exception_type", "expected_phase"),
+    [
+        (httpx.ConnectError, "pre_send"),
+        (httpx.ConnectTimeout, "pre_send"),
+        (httpx.ReadTimeout, "post_send"),
+        (httpx.WriteError, "post_send"),
+        (httpx.RemoteProtocolError, "post_send"),
+        (httpx.PoolTimeout, "post_send"),
+    ],
+)
+def test_transport_errors_preserve_only_safe_request_phase(
+    exception_type, expected_phase, caplog
+):
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise exception_type(
+            f"network failure with {APP_SECRET} and {request.url}",
+            request=request,
+        )
+
+    client = _client(handler)
+    try:
+        with pytest.raises(WeChatTransportError) as caught:
+            client.get_access_token()
+    finally:
+        client.close()
+
+    assert caught.value.phase == expected_phase
+    observable = f"{caught.value!s} {caught.value!r} {caplog.text}"
+    assert APP_ID not in observable
+    assert APP_SECRET not in observable
+    assert "api.weixin.qq.com" not in observable
+    assert caught.value.__context__ is None
+
+
+def test_client_exposes_only_a_hashed_account_identifier():
+    client = _client(lambda _request: _token_response())
+    try:
+        account_id = client.account_id
+    finally:
+        client.close()
+
+    assert account_id.startswith("sha256:")
+    assert len(account_id) == len("sha256:") + 16
+    assert APP_ID not in account_id
+    assert APP_SECRET not in account_id

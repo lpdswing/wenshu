@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import threading
 import time
@@ -96,6 +97,11 @@ class WeChatClient:
 
     def __repr__(self) -> str:
         return "WeChatClient(<redacted>)"
+
+    @property
+    def account_id(self) -> str:
+        digest = hashlib.sha256(self._credentials.app_id.encode("utf-8")).hexdigest()
+        return f"sha256:{digest[:16]}"
 
     @property
     def is_closed(self) -> bool:
@@ -200,14 +206,19 @@ class WeChatClient:
         if files is not None:
             request_kwargs["files"] = files
         response: httpx.Response | None = None
+        transport_phase: str | None = None
         try:
             response = self._http.request(method, path, **request_kwargs)
-        except httpx.RequestError:
-            pass
+        except httpx.RequestError as exc:
+            transport_phase = (
+                "pre_send"
+                if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout))
+                else "post_send"
+            )
         if response is None:
             # Raise outside the handler so the original request (including its
             # credential-bearing query) is not retained as exception context.
-            raise WeChatTransportError()
+            raise WeChatTransportError(transport_phase or "post_send")
 
         if response.status_code < 200 or response.status_code >= 300:
             raise WeChatHTTPError(response.status_code)

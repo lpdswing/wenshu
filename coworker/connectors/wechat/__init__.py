@@ -9,6 +9,13 @@ from .errors import (
     WeChatTransportError,
     classify_wechat_error,
 )
+from .drafts import (
+    DraftReceipt,
+    DraftResult,
+    ReceiptStore,
+    ReceiptStoreError,
+    create_draft,
+)
 from .images import WeChatImageError, upload_body_image, upload_cover
 from .models import WeChatErrorData, WeChatErrorKind
 from .renderer import RenderedArticle, render_wechat_article
@@ -24,6 +31,8 @@ __all__ = [
     "WeChatClient",
     "WeChatCredentialError",
     "WeChatCredentials",
+    "DraftReceipt",
+    "DraftResult",
     "DraftPreview",
     "WeChatError",
     "WeChatErrorData",
@@ -34,8 +43,11 @@ __all__ = [
     "RenderedArticle",
     "WeChatImageError",
     "PreviewImage",
+    "ReceiptStore",
+    "ReceiptStoreError",
     "PreviewValidationError",
     "classify_wechat_error",
+    "create_draft",
     "upload_body_image",
     "upload_cover",
     "render_wechat_article",

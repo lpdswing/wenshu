@@ -36,7 +36,10 @@ class WeChatCredentialError(WeChatError):
 
 
 class WeChatTransportError(WeChatError):
-    def __init__(self) -> None:
+    def __init__(self, phase: str = "pre_send") -> None:
+        if phase not in {"pre_send", "post_send"}:
+            raise ValueError("transport phase must be pre_send or post_send")
+        self.phase = phase
         super().__init__("连接微信接口失败")
 
 
