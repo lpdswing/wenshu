@@ -50,6 +50,20 @@ def test_config_parses_auth_field(tmp_path, monkeypatch):
     assert servers["plain"].auth is None
 
 
+def test_dynamic_registration_uses_wenshu_display_name(tmp_path, monkeypatch):
+    _state(tmp_path, monkeypatch)
+    captured = {}
+
+    class CapturingProvider:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(mcp_oauth, "OAuthClientProvider", CapturingProvider)
+    mcp_oauth.build_auth("granola", GRANOLA["url"], SecretStore())
+
+    assert captured["client_metadata"].client_name == "文枢 WenShu"
+
+
 # -- token storage ---------------------------------------------------------------
 
 
@@ -195,6 +209,8 @@ def test_callback_route(tmp_path, monkeypatch):
         mcp_oauth._pending = future
         r = client.get("/mcp/oauth/callback", params={"code": "c1", "state": "s1"})
         assert r.status_code == 200 and "close this tab" in r.text.lower()
+        assert "文枢 WenShu" in r.text
+        assert "OpenWorker" not in r.text
         assert future.result() == ("c1", "s1")
     finally:
         loop.close()

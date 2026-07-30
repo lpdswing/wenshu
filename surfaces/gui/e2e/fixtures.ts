@@ -1,8 +1,53 @@
-import { test as base, expect, type Page } from "@playwright/test";
+import { test as base, expect, type Locator, type Page } from "@playwright/test";
+import type { ArtifactInfo, ProductInfo } from "../src/api";
 
 // The app-wide /ws/events socket each page opened (UX-026 toast et al.) — specs
 // push server events through it via sendAppEvent below.
 const eventSockets = new WeakMap<Page, { send: (data: string) => void }>();
+
+export interface MockArtifact {
+  readonly path: string;
+  readonly kind: ArtifactInfo["kind"];
+  readonly content: string;
+  readonly name?: string;
+  readonly size?: number;
+  readonly modified_at?: number;
+}
+
+const artifactStores = new WeakMap<Page, readonly MockArtifact[]>();
+
+export function setMockArtifacts(page: Page, artifacts: readonly MockArtifact[]): void {
+  artifactStores.set(page, artifacts);
+}
+
+export const CORE_CHROME = {
+  accountMenu: {
+    inbox: "收件箱",
+    connectors: "连接器",
+    settings: "设置",
+    automations: "自动化",
+    activity: "活动记录",
+  },
+} as const;
+
+export type AccountMenuDestination = keyof typeof CORE_CHROME.accountMenu;
+
+export function accountMenuItem(page: Page, destination: AccountMenuDestination): Locator {
+  return page
+    .getByTestId("account-menu")
+    .getByRole("button", { name: CORE_CHROME.accountMenu[destination], exact: true });
+}
+
+export async function openAccountPage(
+  page: Page,
+  destination: AccountMenuDestination,
+  { navigate = true }: { navigate?: boolean } = {},
+): Promise<void> {
+  if (navigate) await page.goto("/");
+  await page.getByTestId("account-row").click();
+  await expect(page.getByTestId("account-menu")).toBeVisible();
+  await accountMenuItem(page, destination).click();
+}
 
 /** Push an app-wide event exactly as the server would over /ws/events. Waits for
  * the GUI to have connected its socket first. */
@@ -20,7 +65,27 @@ export async function sendAppEvent(page: Page, obj: unknown): Promise<void> {
 // (sessions, personas, inbox, routing, channel subscriptions) are held in per-test in-memory state
 // so add/remove/toggle reflect through the real UI on re-fetch.
 
-const HEALTH = { status: "ok", default_workspace: null, model: "anthropic:claude-opus-4-8" };
+export const WENSHU_PRODUCT: ProductInfo = {
+  id: "wenshu",
+  name: "文枢",
+  display_name: "文枢 WenShu",
+  default_persona: "cowork",
+  visible_connectors: ["browser", "wechat_official"],
+  features: {
+    cloud: false,
+    gallery: false,
+    managed_oauth: false,
+    relay: false,
+    updater: false,
+  },
+};
+
+const HEALTH = {
+  status: "ok",
+  default_workspace: null,
+  model: "anthropic:claude-opus-4-8",
+  product: WENSHU_PRODUCT,
+};
 
 const SETTINGS = {
   provider: "openai",
@@ -33,7 +98,7 @@ const SETTINGS = {
   experimental_connectors: false,
   surfaces: { cowork: true, chat: false, code: true },
   nav_layout: "grouped",
-  scratch_base: "~/OpenWorker",
+  scratch_base: "~/WenShu",
   secrets_path: "/Users/test/.config/coworker/secrets.json",
   sessions_peek: 5,
   // Token savings (PDF attachments): 2-page limit keeps the composer threshold test's
@@ -137,6 +202,7 @@ const SLACK_SESSION = {
 const CONNECTORS = {
   connectors: [
     { name: "browser", title: "Browser", icon: "B", blurb: "Headless browser.", auth: "none", two_way: false, channels: false, available: true, brand_color: "#6b7280", logo: "", fields: [], instructions: [], connected: true, account: null, enabled: true, allowed_users: [], tools: [], managed: false, managed_profile: false },
+    { name: "wechat_official", title: "微信公众号", icon: "微", blurb: "将已确认的图文保存到公众号草稿箱。", about: "把文枢中已确认的图文保存到公众号草稿箱。", access: ["保存图文到草稿箱。", "不会自动发表、群发或删除内容。"], auth: "api_token", two_way: false, channels: false, available: true, brand_color: "#07C160", logo: "wechat", fields: [{ key: "app_id", label: "AppID", secret: false, required: true, help: "", placeholder: "wx…" }, { key: "app_secret", label: "AppSecret", secret: true, required: true, help: "", placeholder: "" }], instructions: ["登录微信公众平台，在开发 → 基本配置中查看 AppID 和 AppSecret。", "将当前出口 IP 加入公众号 IP 白名单。"], connected: false, identity: null, configured_fields: [], enabled: false, allowed_users: [], tools: [], managed: false, managed_profile: false },
     { name: "telegram", title: "Telegram", icon: "T", blurb: "Two-way Telegram messaging.", auth: "bot_token", two_way: true, channels: true, available: true, brand_color: "#229ed9", logo: "telegram", fields: [{ key: "bot_token", label: "Bot token", secret: true, required: true, help: "", placeholder: "123456:ABC…" }], instructions: [], connected: false, account: null, enabled: false, allowed_users: [], tools: [], managed: false, managed_profile: false },
     // Managed-capable connector (one-click via cloud when signed in; manual paste otherwise).
     // Carries pre-connect detail copy (§38): about + access + tools drive available-detail.spec.ts.
@@ -156,6 +222,25 @@ const CONNECTORS = {
     { name: "monday", title: "monday.com", icon: "▦", blurb: "Read boards and items, track work, create items and post updates.", aliases: ["project management", "tasks", "boards"], auth: "oauth", two_way: false, channels: false, available: true, brand_color: "#6161ff", logo: "monday", mcp: true, fields: [], instructions: ["One click connects via monday.com sign-in in your browser.", "Sign-in is fully local — tokens stay on this Mac."], connected: false, account: null, enabled: false, allowed_users: [], tools: [{ name: "mcp__monday__get_board_info", label: "Read board", kind: "read", description: "Read a board's columns and groups.", enabled: true, requires_approval: false }, { name: "mcp__monday__create_item", label: "Create item", kind: "write", description: "Create an item on a board.", enabled: true, requires_approval: true }], managed: false, managed_profile: false },
     { name: "jira", title: "Jira", icon: "◆", blurb: "Search, summarize, create, and update issues.", aliases: ["issues", "tickets", "atlassian"], auth: "api_token", two_way: false, channels: false, available: true, brand_color: "#0052cc", logo: "jira", mcp: true, fields: [{ key: "base_url", label: "Atlassian site URL", secret: false, required: true, help: "", placeholder: "" }, { key: "email", label: "Account email", secret: false, required: true, help: "", placeholder: "" }, { key: "api_token", label: "API token", secret: true, required: true, help: "", placeholder: "" }], instructions: [], connected: false, account: null, enabled: false, allowed_users: [], tools: [], managed: false, managed_profile: false },
   ],
+};
+
+export const OPENWORKER_PRODUCT: ProductInfo = {
+  id: "openworker",
+  name: "OpenWorker",
+  display_name: "OpenWorker",
+  default_persona: "cowork",
+  visible_connectors: [
+    "slack",
+    "github",
+    ...CONNECTORS.connectors.map(({ name }) => name),
+  ],
+  features: {
+    cloud: true,
+    gallery: true,
+    managed_oauth: true,
+    relay: true,
+    updater: true,
+  },
 };
 
 // Two pending items across two personas: drives the Inbox kind tabs, the persona filter chips
@@ -326,7 +411,7 @@ const baseName = (p: string) => p.split("/").filter(Boolean).pop() || p;
 
 const PROVIDERS = [
   // openai: configured + used (drives the "Last used" sub-line and the status dot).
-  { name: "openai", title: "OpenAI", needs_key: true, fields: [{ key: "api_key", label: "OpenAI API key", secret: true, required: true, help: "", placeholder: "sk-…" }], configured: true, values: {}, suggested_models: ["gpt-5.5"], key_set_at: "2026-06-12", last_used_at: Math.floor(Date.now() / 1000) - 7200 },
+  { name: "openai", title: "OpenAI", needs_key: true, fields: [{ key: "api_key", label: "OpenAI API key", secret: true, required: true, help: "", placeholder: "sk-…" }, { key: "image_model", label: "图片模型", secret: false, required: false, help: "用于封面和正文配图，与对话模型分开设置；也可输入自定义模型 ID。", placeholder: "", default: "gpt-image-2", options: ["gpt-image-2", "gpt-image-1.5", "gpt-image-1"] }], configured: true, values: {}, image_model: "gpt-image-2", suggested_models: ["gpt-5.5"], key_set_at: "2026-06-12", last_used_at: Math.floor(Date.now() / 1000) - 7200 },
   // anthropic: configured but never used ("Not used yet").
   { name: "anthropic", title: "Claude (Anthropic)", needs_key: true, fields: [{ key: "api_key", label: "API key", secret: true, required: true, help: "", placeholder: "sk-…" }], configured: true, values: {}, suggested_models: ["claude-opus-4-8"], key_set_at: null, last_used_at: null },
   // zai: an OpenAI-compatible vendor — unconfigured, with a prefilled editable endpoint + blurb.
@@ -337,7 +422,11 @@ const PROVIDERS = [
 ];
 
 /** Install the API + WebSocket mocks on a page. Returns handles for assertions/seed data. */
-export async function mockApi(page: import("@playwright/test").Page) {
+export async function mockApi(
+  page: Page,
+  product: ProductInfo = OPENWORKER_PRODUCT,
+) {
+  if (!artifactStores.has(page)) artifactStores.set(page, []);
   const subscriptions: any[] = [
     // One existing subscription (a non-pinned session) so the Slack page's per-workspace
     // "Listening" row has an entry. Relay-mode channels are team-qualified (slack:T…/C…).
@@ -400,6 +489,27 @@ export async function mockApi(page: import("@playwright/test").Page) {
     installations: githubState.installations.map((i) => ({ ...i, allowed_users: [...i.allowed_users] })),
     unauthorized: githubParked.map((x) => ({ ...x })),
   });
+  // WeChat Official Account — only the identity and configured field names ever
+  // leave the fixture. The submitted AppSecret is deliberately never stored.
+  const wechatState = {
+    connected: false,
+    identity: null as string | null,
+    configured_fields: [] as string[],
+    settings: {
+      need_open_comment: false,
+      only_fans_can_comment: false,
+    },
+  };
+  const wechatConnector = () => {
+    const base = CONNECTORS.connectors.find((c) => c.name === "wechat_official");
+    return {
+      ...base,
+      connected: wechatState.connected,
+      enabled: wechatState.connected,
+      identity: wechatState.identity,
+      configured_fields: [...wechatState.configured_fields],
+    };
+  };
   // Gmail — PER-TEST multi-account state (starts disconnected; managed connects add
   // mailboxes instantly, mirroring the backend's gmail:account:<email> profiles).
   // NOTE: the real server currently sends managed_paused: true for the Google trio
@@ -576,12 +686,84 @@ export async function mockApi(page: import("@playwright/test").Page) {
     let pendingTool = "run_shell"; // which proposal the next approval decision resolves
     let epicTimer: ReturnType<typeof setInterval> | null = null; // the slow stream, stoppable via interrupt
     let hadTurn = false; // a user_message landed — set_model is now a mid-session switch
+    let hadImage = false;
     ws.onMessage((raw) => {
       const msg = JSON.parse(String(raw));
       if (msg.type === "user_message") {
         hadTurn = true;
+        hadImage ||= Array.isArray(msg.attachments) && msg.attachments.some(
+          (attachment: unknown) =>
+            !!attachment &&
+            typeof attachment === "object" &&
+            "kind" in attachment &&
+            attachment.kind === "image",
+        );
         send("turn_start", { input: msg.text });
-        if (/run a tool/i.test(msg.text)) {
+        if (/生成文章配图/.test(msg.text)) {
+          pendingTool = "generate_article_assets";
+          const toolArgs = {
+            article_path: "drafts/article.md",
+            reviewed_hash: "a".repeat(64),
+            cover_request: {
+              subject: "文枢内容流水线",
+              prompt: "raw cover prompt",
+              aspect_ratio: "2:1",
+            },
+            illustration_plan: [
+              { section: "第一节", prompt: "raw illustration prompt 1" },
+              { section: "第二节", prompt: "raw illustration prompt 2" },
+              { section: "第三节", prompt: "raw illustration prompt 3" },
+            ],
+          };
+          send("tool_proposed", {
+            name: "generate_article_assets",
+            arguments: toolArgs,
+          });
+          send("permission_required", {
+            name: "generate_article_assets",
+            arguments: {
+              ...toolArgs,
+              article_title: "文枢内容流水线",
+              provider: "OpenAI",
+              model: "gpt-image-2",
+              total_images: 4,
+            },
+            reason: "",
+            category: "content-generation",
+          });
+          return;
+        }
+        if (/保存公众号草稿/.test(msg.text)) {
+          pendingTool = "create_wechat_draft";
+          send("tool_proposed", {
+            name: "create_wechat_draft",
+            arguments: {
+              article_path: "/Users/test/private/drafts/article.md",
+              preview_hash: "e2e-sensitive-preview-hash",
+              theme: "classic",
+              color: "#1f4d3a",
+              cover_path: "drafts/assets/cover.png",
+            },
+          });
+          send("permission_required", {
+            name: "create_wechat_draft",
+            arguments: {
+              channel: "微信公众号",
+              title: "文枢内容流水线",
+              digest: "先审文字，再完成图文排版。",
+              cover_path: "drafts/assets/cover.png",
+              image_count: 2,
+              theme: "classic",
+              color: "#1f4d3a",
+              draft_only: true,
+            },
+            reason: "",
+            category: "connector",
+            approval_once_only: true,
+          });
+          return;
+        }
+        if (/(?:run a tool|运行一个工具)/i.test(msg.text)) {
           pendingTool = "run_shell";
           send("tool_proposed", { name: "run_shell", arguments: { command: "ls" } });
           send("permission_required", {
@@ -592,7 +774,7 @@ export async function mockApi(page: import("@playwright/test").Page) {
           return; // suspended on the approval
         }
         // §35 compact row: a routine workspace write (content rides in the args).
-        if (/write a file/i.test(msg.text)) {
+        if (/(?:write a file|写一个文件)/i.test(msg.text)) {
           pendingTool = "write_file";
           const args = {
             path: "src/fetch_data.py",
@@ -604,7 +786,7 @@ export async function mockApi(page: import("@playwright/test").Page) {
         }
         // A one-paragraph digest with NO newlines — the owner-repro shape that once
         // ballooned the card to full-transcript height (char clamp, 2026-07-15).
-        if (/post the long digest/i.test(msg.text)) {
+        if (/(?:post the long digest|长摘要)/i.test(msg.text)) {
           pendingTool = "send_message";
           const args = {
             target: "slack:T1/C1",
@@ -707,7 +889,43 @@ export async function mockApi(page: import("@playwright/test").Page) {
         send("assistant_message", { text: `Echo: ${msg.text} [model=${msg.model || "none"}]` });
         send("turn_done");
       } else if (msg.type === "approval") {
-        if (pendingTool === "run_shell") {
+        if (pendingTool === "create_wechat_draft") {
+          if (msg.decision === "deny") {
+            send("tool_finished", { name: pendingTool, status: "denied" });
+            send("assistant_message", { text: "已取消保存公众号草稿。" });
+          } else {
+            send("tool_finished", {
+              name: pendingTool,
+              status: "ok",
+              result_preview: '{"status":"success","title":"truncated',
+              display: {
+                wechat_draft_result: {
+                  status: "success",
+                  title: "文枢内容流水线",
+                  error_kind: "",
+                  uploaded_asset_count: 3,
+                  uploaded_assets: ["cover.png", "image-1.png", "image-2.png"],
+                  draft_only: true,
+                },
+              },
+            });
+            send("assistant_message", {
+              text: `公众号草稿处理完成。[decision=${msg.decision}]`,
+            });
+          }
+        } else if (pendingTool === "generate_article_assets") {
+          if (msg.decision === "deny") {
+            send("tool_finished", { name: pendingTool, status: "denied" });
+            send("assistant_message", { text: "已取消生成文章配图。" });
+          } else {
+            send("tool_finished", {
+              name: pendingTool,
+              status: "done",
+              result_preview: "已生成 4 张图片",
+            });
+            send("assistant_message", { text: "文章配图已生成。" });
+          }
+        } else if (pendingTool === "run_shell") {
           if (msg.decision === "deny") {
             send("tool_finished", { name: "run_shell", status: "denied" });
             send("assistant_message", { text: "Understood — skipped the command." });
@@ -739,7 +957,9 @@ export async function mockApi(page: import("@playwright/test").Page) {
         if (hadTurn)
           send("model_changed", {
             model: msg.model,
-            text: `Model switched to ${msg.model}`,
+            text:
+              `Model switched to ${msg.model}` +
+              (hadImage ? " — earlier images can't be read by this model" : ""),
           });
       } else if (msg.type === "retry") {
         // Like the real engine: re-runs with NO new user message (turn_start input is empty).
@@ -785,6 +1005,35 @@ export async function mockApi(page: import("@playwright/test").Page) {
       }
       return json({ roots });
     }
+    if (/\/v1\/sessions\/[^/]+\/artifacts\/read$/.test(p) && m === "GET") {
+      const artifactPath = new URL(req.url()).searchParams.get("path") || "";
+      const artifact = (artifactStores.get(page) || []).find(
+        (candidate) => candidate.path === artifactPath,
+      );
+      if (!artifact) {
+        return json(
+          { ok: false, error: "未找到交付物。", path: artifactPath, kind: "text" },
+          404,
+        );
+      }
+      return json({
+        ok: true,
+        path: artifact.path,
+        kind: artifact.kind,
+        content: artifact.content,
+      });
+    }
+    if (/\/v1\/sessions\/[^/]+\/artifacts$/.test(p) && m === "GET") {
+      return json({
+        artifacts: (artifactStores.get(page) || []).map((artifact) => ({
+          path: artifact.path,
+          name: artifact.name || baseName(artifact.path),
+          kind: artifact.kind,
+          size: artifact.size ?? artifact.content.length,
+          modified_at: artifact.modified_at ?? 0,
+        })),
+      });
+    }
     if (/\/v1\/sessions\/[^/]+\/messages$/.test(p)) return json({ messages: [] });
     if (/\/v1\/sessions\/[^/]+\/unattended$/.test(p)) {
       const id = decodeURIComponent(p.split("/").slice(-2)[0]);
@@ -808,7 +1057,7 @@ export async function mockApi(page: import("@playwright/test").Page) {
       return json(i >= 0 ? sessions[i] : PINNED_SESSION);
     }
 
-    if (p.endsWith("/v1/health")) return json(HEALTH);
+    if (p.endsWith("/v1/health")) return json({ ...HEALTH, product });
     if (p.endsWith("/v1/settings")) return json(SETTINGS);
     if (p.endsWith("/v1/settings/pdf") && m === "POST") {
       Object.assign(SETTINGS, req.postDataJSON());
@@ -1107,13 +1356,68 @@ export async function mockApi(page: import("@playwright/test").Page) {
         hubspotState.hidden_fields = b.hidden_fields.map((f: string) => f.trim().toLowerCase());
       return json({ ok: true, hidden_fields: [...hubspotState.hidden_fields] });
     }
-    if (p.endsWith("/v1/connectors"))
-      return json({
-        connectors: [
-          slackConnector(),
-          githubConnector(),
-          ...CONNECTORS.connectors.map((c: any) =>
-            c.name === "gmail"
+    if (p.endsWith("/v1/connectors/wechat_official/settings")) {
+      if (!wechatState.connected)
+        return json({ detail: "微信公众号尚未连接" }, 409);
+      if (m === "PATCH") {
+        const body = req.postDataJSON() || {};
+        const keys = Object.keys(body);
+        if (
+          keys.some(
+            (key) =>
+              key !== "need_open_comment" && key !== "only_fans_can_comment",
+          ) ||
+          keys.length !== 2 ||
+          typeof body.need_open_comment !== "boolean" ||
+          typeof body.only_fans_can_comment !== "boolean"
+        )
+          return json({ detail: "评论设置必须是布尔值" }, 400);
+        wechatState.settings = {
+          need_open_comment: body.need_open_comment,
+          only_fans_can_comment:
+            body.need_open_comment && body.only_fans_can_comment,
+        };
+      }
+      return json({ ...wechatState.settings });
+    }
+    if (p.endsWith("/v1/connectors/wechat_official/connect") && m === "POST") {
+      const body = req.postDataJSON() || {};
+      const fields = body.fields || {};
+      if (
+        Object.keys(fields).length !== 2 ||
+        typeof fields.app_id !== "string" ||
+        !fields.app_id ||
+        typeof fields.app_secret !== "string" ||
+        !fields.app_secret
+      )
+        return json({ ok: false, error: "AppID 和 AppSecret 均为必填项" }, 400);
+      wechatState.connected = true;
+      wechatState.identity = fields.app_id;
+      wechatState.configured_fields = ["app_id", "app_secret"];
+      wechatState.settings = {
+        need_open_comment: false,
+        only_fans_can_comment: false,
+      };
+      return json({ ok: true, identity: fields.app_id });
+    }
+    if (p.endsWith("/v1/connectors/wechat_official/disconnect") && m === "POST") {
+      wechatState.connected = false;
+      wechatState.identity = null;
+      wechatState.configured_fields = [];
+      wechatState.settings = {
+        need_open_comment: false,
+        only_fans_can_comment: false,
+      };
+      return json({ ok: true });
+    }
+    if (p.endsWith("/v1/connectors")) {
+      const connectors = [
+        slackConnector(),
+        githubConnector(),
+        ...CONNECTORS.connectors.map((c) =>
+          c.name === "wechat_official"
+            ? wechatConnector()
+            : c.name === "gmail"
               ? gmailConnector()
               : c.name === "google_calendar"
                 ? gcalConnector()
@@ -1126,9 +1430,11 @@ export async function mockApi(page: import("@playwright/test").Page) {
                       : c.name === "monday" || c.name === "jira"
                         ? mcpConnector(c.name)
                         : { ...c },
-          ),
-        ],
-      });
+        ),
+      ];
+      const visible = new Set(product.visible_connectors);
+      return json({ connectors: connectors.filter((c) => visible.has(c.name)) });
+    }
     if (p.endsWith("/v1/cloud/status")) return json({ ...CLOUD_STATE });
     if (p.endsWith("/v1/cloud/login") && m === "POST") {
       Object.assign(CLOUD_STATE, { signed_in: true, account: "rohit@openworker.com", user_id: "usr_e2e" });
@@ -1243,6 +1549,14 @@ export async function mockApi(page: import("@playwright/test").Page) {
         recommends: [
           { kind: "connector", ref: "hubspot", reason: "read deals and contacts", tier: "core" },
         ],
+      });
+    }
+    if (p.endsWith("/v1/image-generation/status")) {
+      const openai = providers.find((provider) => provider.name === "openai");
+      return json({
+        configured: Boolean(openai?.configured),
+        provider: "openai",
+        model: openai?.values?.image_model || openai?.image_model || "gpt-image-2",
       });
     }
     // provider credential check (read-only) — an api_key containing "bad" fails, else ok.
@@ -1486,6 +1800,15 @@ export async function mockApi(page: import("@playwright/test").Page) {
 export const test = base.extend({
   page: async ({ page }, use) => {
     await mockApi(page);
+    await use(page);
+  },
+});
+
+// WenShu's production profile is opt-in here so legacy feature suites can keep
+// exercising the injectable all-features profile through `test`.
+export const wenshuTest = base.extend({
+  page: async ({ page }, use) => {
+    await mockApi(page, WENSHU_PRODUCT);
     await use(page);
   },
 });

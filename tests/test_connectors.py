@@ -5,6 +5,7 @@ tool, settings/authorization, and the gateway inbound loop — all offline via F
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 
 import pytest
 
@@ -21,6 +22,7 @@ from coworker.connectors import (
 )
 from coworker.connectors.base import SendResult
 from coworker.secrets import SecretStore
+from coworker.product import current_product
 
 
 # -- target tokens -------------------------------------------------------------
@@ -212,6 +214,115 @@ class _StubProvider:
         yield StreamChunk(turn=self.complete())
 
 
+def test_hidden_connected_connector_tools_are_not_registered(tmp_path):
+    from coworker.agent import build_engine
+    from coworker.agents import cowork_agent
+    from coworker.connectors import connector_list
+
+    secrets = SecretStore(tmp_path / "secrets.json")
+    secrets.put("notion:default", {"access_token": "secret", "enabled": True})
+
+    notion = {
+        connector["name"]: connector for connector in connector_list(secrets)
+    }["notion"]
+    assert notion["connected"] is True
+    assert notion["enabled"] is True
+
+    engine = build_engine(
+        agent=cowork_agent(),
+        workspace=tmp_path,
+        provider=_StubProvider(),
+        secrets=secrets,
+        product=current_product(),
+    )
+
+    assert not any(name.startswith("notion_") for name in engine.registry.names())
+
+
+@pytest.mark.parametrize("connector", ["slack", "telegram"])
+def test_messaging_tools_follow_product_profile(tmp_path, connector):
+    from coworker.agent import build_engine
+    from coworker.agents import cowork_agent
+
+    secrets = SecretStore(tmp_path / "secrets.json")
+    secrets.put(f"{connector}:default", {"bot_token": "secret", "enabled": True})
+
+    hidden = build_engine(
+        agent=cowork_agent(),
+        workspace=tmp_path,
+        provider=_StubProvider(),
+        secrets=secrets,
+        product=current_product(),
+    )
+    assert "send_message" not in hidden.registry.names()
+    assert "send_file" not in hidden.registry.names()
+
+    visible_product = replace(
+        current_product(),
+        visible_connectors=current_product().visible_connectors | {connector},
+    )
+    visible = build_engine(
+        agent=cowork_agent(),
+        workspace=tmp_path,
+        provider=_StubProvider(),
+        secrets=secrets,
+        product=visible_product,
+    )
+    assert "send_message" in visible.registry.names()
+    assert "send_file" in visible.registry.names()
+
+
+@pytest.mark.parametrize(
+    ("visible_connector", "hidden_connector"),
+    [("slack", "telegram"), ("telegram", "slack")],
+)
+def test_messaging_tool_targets_are_product_scoped(
+    tmp_path, monkeypatch, visible_connector, hidden_connector
+):
+    from coworker.agent import build_engine
+    from coworker.agents import cowork_agent
+    from coworker.connectors import tools as connector_tools
+
+    monkeypatch.setitem(
+        connector_tools.DEFAULT_SENDERS,
+        hidden_connector,
+        lambda *_args, **_kwargs: SendResult(True, message_id="sent"),
+    )
+    monkeypatch.setitem(
+        connector_tools.DEFAULT_FILE_SENDERS,
+        hidden_connector,
+        lambda *_args, **_kwargs: SendResult(True, message_id="file"),
+    )
+
+    secrets = SecretStore(tmp_path / "secrets.json")
+    for connector in (visible_connector, hidden_connector):
+        secrets.put(
+            f"{connector}:default", {"bot_token": "secret", "enabled": True}
+        )
+    product = replace(
+        current_product(),
+        visible_connectors=current_product().visible_connectors | {visible_connector},
+    )
+    (tmp_path / "report.txt").write_text("report")
+    engine = build_engine(
+        agent=cowork_agent(),
+        workspace=tmp_path,
+        provider=_StubProvider(),
+        secrets=secrets,
+        product=product,
+    )
+
+    expected = {"error": f"connector not available in this product: {hidden_connector}"}
+    assert engine.registry.execute(
+        "send_message",
+        {"target": f"{hidden_connector}:destination", "text": "hello"},
+    ) == expected
+    assert engine.registry.execute(
+        "send_file",
+        {"target": f"{hidden_connector}:destination", "path": "report.txt"},
+    ) == expected
+
+
 def test_engine_connector_tools_are_cowork_scoped(tmp_path):
     from coworker.agent import build_engine
     from coworker.agents import chat_agent, code_agent, cowork_agent, myhelper_agent
@@ -222,6 +333,10 @@ def test_engine_connector_tools_are_cowork_scoped(tmp_path):
     assert "browser_read_url" not in eng.registry.names()
 
     secrets.put("telegram:default", {"bot_token": "T"})
+    messaging_product = replace(
+        current_product(),
+        visible_connectors=current_product().visible_connectors | {"telegram"},
+    )
     chat = build_engine(agent=chat_agent(), provider=_StubProvider(), secrets=secrets)
     code = build_engine(
         agent=code_agent(),
@@ -234,12 +349,14 @@ def test_engine_connector_tools_are_cowork_scoped(tmp_path):
         workspace=tmp_path,
         provider=_StubProvider(),
         secrets=secrets,
+        product=messaging_product,
     )
     helper = build_engine(
         agent=myhelper_agent(),
         workspace=tmp_path,
         provider=_StubProvider(),
         secrets=secrets,
+        product=messaging_product,
     )
 
     assert "send_message" not in chat.registry.names()
@@ -276,6 +393,10 @@ def test_engine_connector_tools_are_cowork_scoped(tmp_path):
         workspace=tmp_path,
         provider=_StubProvider(),
         secrets=secrets,
+        product=replace(
+            current_product(),
+            visible_connectors=current_product().visible_connectors | {"github"},
+        ),
     )
     assert "github_search" in cowork_with_github.registry.names()
     # §36: github_search is a registry READ — free; the write sibling still gates.
@@ -531,7 +652,17 @@ def test_connectors_rest(tmp_path, monkeypatch):
         desc, "validate", lambda creds: ValidationResult(True, identity="@testbot")
     )
 
-    client = TestClient(create_app(SessionManager(data_dir=tmp_path / "data")))
+    client = TestClient(
+        create_app(
+            SessionManager(
+                data_dir=tmp_path / "data",
+                product=replace(
+                    current_product(),
+                    visible_connectors=current_product().visible_connectors | {"telegram"},
+                ),
+            )
+        )
+    )
 
     listed = client.get("/v1/connectors").json()["connectors"]
     assert any(c["name"] == "telegram" for c in listed)
@@ -553,6 +684,140 @@ def test_connectors_rest(tmp_path, monkeypatch):
     assert {c["name"]: c for c in client.get("/v1/connectors").json()["connectors"]}[
         "telegram"
     ]["connected"] is False
+
+
+def test_wechat_descriptor_is_available_and_outbound_only():
+    from coworker.connectors.descriptors import get_descriptor
+
+    descriptor = get_descriptor("wechat_official")
+
+    assert descriptor is not None
+    assert descriptor.title == "微信公众号"
+    assert [field.key for field in descriptor.fields] == ["app_id", "app_secret"]
+    assert descriptor.fields[0].secret is False
+    assert descriptor.fields[1].secret is True
+    assert descriptor.two_way is False
+    assert descriptor.channels is False
+    assert descriptor.brand_color == "#07C160"
+    assert descriptor.logo == "wechat"
+    assert descriptor.account_field == "@identity"
+
+
+def test_wechat_connect_validates_and_initializes_secret_row(tmp_path, monkeypatch):
+    from coworker.connectors import connect_connector, connector_list
+    from coworker.connectors.wechat.client import WeChatClient
+
+    closed = []
+    original_close = WeChatClient.close
+    monkeypatch.setattr(WeChatClient, "get_access_token", lambda self: "ACCESS")
+
+    def close(client):
+        closed.append(client)
+        original_close(client)
+
+    monkeypatch.setattr(WeChatClient, "close", close)
+    secrets = SecretStore(tmp_path / "secrets.json")
+
+    result = connect_connector(
+        secrets,
+        "wechat_official",
+        {"app_id": "wx-public-id", "app_secret": "super-secret"},
+    )
+
+    assert result == {"ok": True, "identity": "wx-public-id"}
+    assert len(closed) == 1
+    assert secrets.get("wechat_official:default") == {
+        "type": "token",
+        "enabled": True,
+        "app_id": "wx-public-id",
+        "app_secret": "super-secret",
+        "identity": "wx-public-id",
+        "need_open_comment": False,
+        "only_fans_can_comment": False,
+    }
+    status = {
+        row["name"]: row for row in connector_list(secrets)
+    }["wechat_official"]
+    assert status["connected"] is True
+    assert status["identity"] == "wx-public-id"
+    assert status["configured_fields"] == ["app_id", "app_secret"]
+    assert "account" not in status
+    assert "super-secret" not in repr(status)
+
+
+def test_wechat_validation_failure_does_not_persist_credentials(tmp_path, monkeypatch):
+    from coworker.connectors import connect_connector
+    from coworker.connectors.wechat.client import WeChatClient
+    from coworker.connectors.wechat.errors import classify_wechat_error
+
+    closed = []
+    original_close = WeChatClient.close
+
+    def fail(_client):
+        raise classify_wechat_error(40013, "invalid appid")
+
+    def close(client):
+        closed.append(client)
+        original_close(client)
+
+    monkeypatch.setattr(WeChatClient, "get_access_token", fail)
+    monkeypatch.setattr(WeChatClient, "close", close)
+    secrets = SecretStore(tmp_path / "secrets.json")
+
+    result = connect_connector(
+        secrets,
+        "wechat_official",
+        {"app_id": "wx-public-id", "app_secret": "must-not-leak"},
+    )
+
+    assert result["ok"] is False
+    assert "凭据" in result["error"]
+    assert "must-not-leak" not in repr(result)
+    assert secrets.get("wechat_official:default") is None
+    assert len(closed) == 1
+
+
+def test_wechat_validation_errors_are_chinese_secret_safe_and_close(monkeypatch):
+    from coworker.connectors.descriptors import get_descriptor
+    from coworker.connectors.wechat.client import WeChatClient
+    from coworker.connectors.wechat.errors import (
+        WeChatHTTPError,
+        WeChatTransportError,
+        classify_wechat_error,
+    )
+
+    cases = [
+        (classify_wechat_error(40013, "bad appid"), "凭据"),
+        (classify_wechat_error(40125, "bad secret"), "凭据"),
+        (classify_wechat_error(40164, "secret=must-not-leak"), "IP"),
+        (classify_wechat_error(48001, "denied"), "权限"),
+        (classify_wechat_error(45009, "busy"), "频繁"),
+        (WeChatHTTPError(429), "频繁"),
+        (WeChatTransportError(), "网络"),
+    ]
+    closed = []
+    original_close = WeChatClient.close
+
+    def close(client):
+        closed.append(client)
+        original_close(client)
+
+    monkeypatch.setattr(WeChatClient, "close", close)
+    validator = get_descriptor("wechat_official").validate
+    assert validator is not None
+
+    for index, (error, expected) in enumerate(cases, start=1):
+        def fail(_client, raised=error):
+            raise raised
+
+        monkeypatch.setattr(WeChatClient, "get_access_token", fail)
+        result = validator(
+            {"app_id": "wx-public-id", "app_secret": "must-not-leak"}
+        )
+        assert result.ok is False
+        assert expected in result.error
+        assert "must-not-leak" not in result.error
+        assert len(closed) == index
 
 
 # -- inbound: event mappers ----------------------------------------------------
@@ -1691,7 +1956,18 @@ def test_experimental_rest_roundtrip(tmp_path, monkeypatch, experimental_descrip
     from coworker.server.manager import SessionManager
 
     monkeypatch.setenv("COWORKER_STATE_DIR", str(tmp_path / "state"))
-    client = TestClient(create_app(SessionManager(data_dir=tmp_path / "data")))
+    client = TestClient(
+        create_app(
+            SessionManager(
+                data_dir=tmp_path / "data",
+                product=replace(
+                    current_product(),
+                    visible_connectors=current_product().visible_connectors
+                    | {"dangerzone"},
+                ),
+            )
+        )
+    )
 
     assert client.get("/v1/settings").json()["experimental_connectors"] is False
     names = {c["name"] for c in client.get("/v1/connectors").json()["connectors"]}

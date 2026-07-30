@@ -119,6 +119,179 @@ def test_disable_persona_archives_its_sessions(tmp_path):
     assert store.load("chat-c").archived
 
 
+def test_wenshu_lists_only_visible_connectors(tmp_path):
+    manager = SessionManager(workspace=tmp_path, provider=ScriptedProvider([]))
+
+    names = {row["name"] for row in manager.list_connectors()}
+
+    assert names <= {"browser", "wechat_official"}
+    assert "browser" in names
+    assert "slack" not in names
+
+def test_wenshu_hidden_connector_writes_fail_before_side_effects(
+    tmp_path, monkeypatch
+):
+    manager = SessionManager(workspace=tmp_path, provider=ScriptedProvider([]))
+    client = TestClient(create_app(manager))
+    calls = []
+
+    def must_not_validate(*args, **kwargs):
+        calls.append(("manual", args, kwargs))
+        raise AssertionError("hidden connector reached validation")
+
+    async def must_not_authorize(name):
+        calls.append(("mcp", name))
+        raise AssertionError("hidden connector reached OAuth")
+
+    monkeypatch.setattr("coworker.server.manager.connect_connector", must_not_validate)
+    monkeypatch.setattr(manager, "mcp_connect_connector", must_not_authorize)
+
+    manual = client.post(
+        "/v1/connectors/slack/connect",
+        json={"fields": {"bot_token": "xoxb", "app_token": "xapp"}},
+    ).json()
+    mcp = client.post("/v1/connectors/monday/mcp-connect").json()
+
+    assert manual == {
+        "ok": False,
+        "error": "connector not available in this product: slack",
+    }
+    assert mcp == {
+        "ok": False,
+        "error": "connector not available in this product: monday",
+    }
+    assert calls == []
+    assert manager.secrets.get("slack:default") is None
+    assert manager.secrets.get("monday:default") is None
+
+
+
+def test_wechat_settings_require_connected_account(tmp_path):
+    manager = SessionManager(workspace=tmp_path, provider=ScriptedProvider([]))
+    client = TestClient(create_app(manager))
+
+    response = client.get("/v1/connectors/wechat_official/settings")
+    assert response.status_code == 409
+    assert "尚未连接" in response.json()["error"]
+
+    response = client.patch(
+        "/v1/connectors/wechat_official/settings",
+        json={"need_open_comment": True},
+    )
+    assert response.status_code == 409
+    assert manager.secrets.get("wechat_official:default") is None
+
+
+def test_wechat_connect_and_settings_are_secret_safe_and_normalized(
+    tmp_path, monkeypatch
+):
+    from coworker.connectors.wechat.client import WeChatClient
+
+    monkeypatch.setattr(WeChatClient, "get_access_token", lambda self: "ACCESS")
+    manager = SessionManager(workspace=tmp_path, provider=ScriptedProvider([]))
+    client = TestClient(create_app(manager))
+
+    connected = client.post(
+        "/v1/connectors/wechat_official/connect",
+        json={
+            "fields": {
+                "app_id": "wx-public-id",
+                "app_secret": "must-not-leak",
+            }
+        },
+    )
+    assert connected.status_code == 200
+    assert connected.json() == {"ok": True, "identity": "wx-public-id"}
+
+    response = client.get("/v1/connectors/wechat_official/settings")
+    assert response.status_code == 200
+    assert response.json() == {
+        "need_open_comment": False,
+        "only_fans_can_comment": False,
+    }
+
+    response = client.patch(
+        "/v1/connectors/wechat_official/settings",
+        json={"need_open_comment": True, "only_fans_can_comment": True},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "need_open_comment": True,
+        "only_fans_can_comment": True,
+    }
+
+    response = client.patch(
+        "/v1/connectors/wechat_official/settings",
+        json={"need_open_comment": False},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "need_open_comment": False,
+        "only_fans_can_comment": False,
+    }
+    stored = manager.secrets.get("wechat_official:default")
+    assert stored["app_id"] == "wx-public-id"
+    assert stored["app_secret"] == "must-not-leak"
+    assert stored["need_open_comment"] is False
+    assert stored["only_fans_can_comment"] is False
+
+    listing_response = client.get("/v1/connectors")
+    listed = {
+        row["name"]: row for row in listing_response.json()["connectors"]
+    }["wechat_official"]
+    assert listed["configured_fields"] == ["app_id", "app_secret"]
+    assert listed["identity"] == "wx-public-id"
+    assert not {"app_id", "app_secret", "access_token", "token"} & set(listed)
+    assert "must-not-leak" not in listing_response.text
+    assert "ACCESS" not in listing_response.text
+
+    account_route = client.post(
+        "/v1/connectors/wechat_official/accounts/default/default"
+    )
+    assert account_route.json() == {
+        "ok": False,
+        "error": "not a multi-account connector",
+    }
+    assert manager.secrets.get("wechat_official:default") == stored
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"need_open_comment": "false"},
+        {"only_fans_can_comment": 1},
+        {"unknown": True},
+        None,
+        [],
+    ],
+)
+def test_wechat_settings_patch_rejects_unknown_or_non_boolean_values(
+    tmp_path, monkeypatch, body
+):
+    from coworker.connectors.wechat.client import WeChatClient
+
+    monkeypatch.setattr(WeChatClient, "get_access_token", lambda self: "ACCESS")
+    manager = SessionManager(workspace=tmp_path, provider=ScriptedProvider([]))
+    client = TestClient(create_app(manager))
+    client.post(
+        "/v1/connectors/wechat_official/connect",
+        json={"fields": {"app_id": "wx-id", "app_secret": "secret"}},
+    )
+
+    response = client.patch(
+        "/v1/connectors/wechat_official/settings",
+        json=body,
+    )
+
+    assert response.status_code == 400
+    assert manager.secrets.get("wechat_official:default")[
+        "need_open_comment"
+    ] is False
+    assert manager.secrets.get("wechat_official:default")[
+        "only_fans_can_comment"
+    ] is False
+
+
 def test_connector_tool_settings_and_audit_rest(tmp_path):
     client = _client(tmp_path, [])
     connectors = {
@@ -595,12 +768,13 @@ def test_sidecar_token_gates_rest_and_websockets(tmp_path, monkeypatch):
     ) as ws:
         assert ws.accepted_subprotocol == "openworker"
 
-    # Redirect callbacks remain tokenless, then enforce their own signed state.
+    # Redirect callbacks remain tokenless. Disabled upstream callbacks stop at their feature
+    # gates; the local MCP callback still enforces its own pending-flow state.
     assert client.get(
         "/auth/callback", params={"code": "x", "state": "bad"}
-    ).status_code == 400
+    ).status_code == 404
     assert client.get("/mcp/oauth/callback").status_code == 400
-    assert client.post("/oauth/callback", data={"app_state": "bad"}).status_code == 400
+    assert client.post("/oauth/callback", data={"app_state": "bad"}).status_code == 404
 
 
 def test_ws_approval_round_trip(tmp_path):
@@ -1024,10 +1198,18 @@ def test_always_allow_grants_survive_restart(tmp_path):
     _run_turn(TestClient(create_app(mgr2)), expect_prompts=0)
 
 
-def test_google_one_click_paused_but_manual_alive(tmp_path):
+def test_google_one_click_paused_but_manual_alive(tmp_path, permissive_product):
     """CASA verification pending: Gmail/Calendar/Drive expose managed_paused (GUI badges
     "Coming soon"), the managed-connect route refuses, and the manual fields stay."""
-    client = _client(tmp_path, [])
+    client = TestClient(
+        create_app(
+            SessionManager(
+                workspace=tmp_path,
+                provider=ScriptedProvider([]),
+                product=permissive_product,
+            )
+        )
+    )
     connectors = {c["name"]: c for c in client.get("/v1/connectors").json()["connectors"]}
     for name in ("gmail", "google_calendar", "google_drive"):
         c = connectors[name]

@@ -3,12 +3,11 @@
 // the tool list behind a collapsed disclosure; Connect opens the same modal as
 // the list's pill (which itself must NOT navigate).
 import { expect } from "@playwright/test";
-import { test } from "./fixtures";
+import { openAccountPage, test } from "./fixtures";
 
 async function openConnectors(page) {
-  await page.goto("/");
-  await page.getByTestId("account-row").click();
-  await page.getByRole("button", { name: "Connectors", exact: true }).click();
+  await openAccountPage(page, "connectors");
+  
 }
 
 test("available row opens the pre-connect detail page", async ({ page }) => {

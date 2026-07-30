@@ -3,18 +3,18 @@
 // cloud sign-in — and agents get only the PINNED tool subset, surfaced on the
 // connector detail page like any other curated tool set.
 import { expect } from "@playwright/test";
-import { test } from "./fixtures";
+import { openAccountPage, test } from "./fixtures";
 
 async function openConnectors(page) {
-  await page.goto("/");
-  await page.getByTestId("account-row").click();
-  await page.getByRole("button", { name: "Connectors", exact: true }).click();
+  await openAccountPage(page, "connectors");
+  
 }
 
 test("monday: one-click MCP connect without cloud sign-in; card flips connected", async ({
   page,
 }) => {
   await openConnectors(page);
+  await page.getByRole("button", { name: "show all" }).click();
 
   // Signed OUT (fixtures default) — the MCP one-click needs no OpenWorker account.
   await page
@@ -63,6 +63,7 @@ test("monday detail page shows the pinned tool subset with approval badges", asy
   page,
 }) => {
   await openConnectors(page);
+  await page.getByRole("button", { name: "show all" }).click();
   await page.getByTestId("connector-monday").click();
   await expect(page.getByText("2 tools this connector adds")).toBeVisible();
   await page.getByText("View", { exact: true }).click();

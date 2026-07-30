@@ -4,13 +4,11 @@
 // configured-unused, Z AI unconfigured w/ a prefilled endpoint behind the disclosure). The
 // mock's /verify fails on a key containing "bad"; POST /v1/providers flips `configured`.
 import { expect } from "@playwright/test";
-import { test } from "./fixtures";
+import { openAccountPage, test } from "./fixtures";
 
 async function openModels(page) {
-  await page.goto("/");
-  await page.getByTestId("account-row").click();
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Models", exact: true }).click();
+  await openAccountPage(page, "settings");
+  await page.getByRole("button", { name: "模型", exact: true }).click();
   await expect(page.getByTestId("set-provider-openai")).toBeVisible();
 }
 
@@ -28,8 +26,8 @@ test("Test with a bad key fails in place; a good key saves and returns to the ga
   // slides home and the card wears its ✓.
   await page.getByTestId("set-field-api_key").fill("sk-glm-realkey");
   await page.getByTestId("set-test").click();
-  await expect(page.getByTestId("set-saved-pill")).toContainText("Tested & saved");
-  await expect(page.getByTestId("set-provider-zai")).toContainText("✓ Connected", {
+  await expect(page.getByTestId("set-saved-pill")).toContainText("已测试并保存");
+  await expect(page.getByTestId("set-provider-zai")).toContainText("✓ 已连接", {
     timeout: 5_000,
   });
 
@@ -39,7 +37,7 @@ test("Test with a bad key fails in place; a good key saves and returns to the ga
   await page.getByTestId("set-provider-zai").click();
   await expect(page.getByTestId("set-field-api_key")).toHaveValue("");
   await expect(page.getByTestId("set-field-api_key")).toHaveAttribute("placeholder", "••••••••");
-  await expect(page.getByTestId("set-saved-pill")).toContainText("Tested & saved");
+  await expect(page.getByTestId("set-saved-pill")).toContainText("已测试并保存");
 });
 
 test("a configured provider's form opens with the saved state, no plaintext key", async ({
@@ -48,7 +46,7 @@ test("a configured provider's form opens with the saved state, no plaintext key"
   await openModels(page);
   await page.getByTestId("set-provider-openai").click();
   // Stored credentials show as the in-field saved pill + masked placeholder — never the key.
-  await expect(page.getByTestId("set-saved-pill")).toContainText("Tested & saved");
+  await expect(page.getByTestId("set-saved-pill")).toContainText("已测试并保存");
   await expect(page.getByTestId("set-field-api_key")).toHaveValue("");
   await expect(page.getByTestId("set-field-api_key")).toHaveAttribute("placeholder", "••••••••");
 });
@@ -70,4 +68,31 @@ test("non-secret fields blur-save on a configured provider (ollama endpoint)", a
   await page.getByTestId("set-back").click();
   await page.getByTestId("set-provider-ollama").click();
   await expect(page.getByTestId("set-field-base_url")).toHaveValue("http://127.0.0.1:9999");
+});
+
+test("OpenAI image model is separate from chat models and persists custom ids", async ({
+  page,
+}) => {
+  await openModels(page);
+  await page.getByTestId("set-provider-openai").click();
+
+  const imageModel = page.getByTestId("set-field-image_model");
+  await expect(page.getByTestId("image-generation-status")).toContainText(
+    "已配置 · gpt-image-2",
+  );
+  await expect(imageModel).toHaveValue("gpt-image-2");
+  await expect(imageModel).toHaveAttribute("list", "set-options-image_model");
+  await expect(page.getByTestId("set-field-api_key")).toHaveValue("");
+
+  await imageModel.fill("custom-image:v2");
+  await imageModel.blur();
+  await expect(page.getByTestId("set-field-saved-image_model")).toBeVisible();
+
+  await page.getByTestId("set-back").click();
+  await page.getByTestId("set-provider-openai").click();
+  await expect(page.getByTestId("set-field-image_model")).toHaveValue("custom-image:v2");
+  await expect(page.getByTestId("set-field-api_key")).toHaveValue("");
+  await expect(page.getByTestId("image-generation-status")).toContainText(
+    "已配置 · custom-image:v2",
+  );
 });

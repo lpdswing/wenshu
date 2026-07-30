@@ -6,19 +6,26 @@ import { indexConnectors, visualFor, type ConnectorMap } from "../connectors/vis
 import { useRoots } from "../useRoots";
 import { AddFolderForm } from "./AddFolderForm";
 
-// Empty-state for a fresh Cowork session (§27): a greeting, exactly three concrete template
-// tasks, and the composer — nothing else. Each task carries its own setup: no icon tiles (the
-// title is the row), connector dots on the sub-line (brand color = connected and enabled for
-// this session, grayscale = not — §23's vocabulary), and sub-line copy that is always the task's
-// OUTCOME, never connection state. Sources ready → "Start →" on hover, click prefills the
-// composer. Not ready → "Configure ›" always visible (for a gated row the setup action IS the
-// row's meaning), opening the §23 Session settings drawer — no second setup surface here.
+const CONTENT_SUGGESTIONS = [
+  {
+    title: "整理这些资料，先生成一版文章草稿。",
+    detail: "梳理素材、提炼重点，先形成一版可审阅的文章",
+  },
+  {
+    title: "审阅文章后，为它规划封面和正文配图。",
+    detail: "根据文章结构给出图片主题、位置和制作要求",
+  },
+  {
+    title: "把确认后的文章整理成公众号草稿。",
+    detail: "整理标题、摘要、正文层级和发布前检查项",
+  },
+];
 
-const FOLDER_PROMPT = "Analyze the files in this folder and summarize what matters.";
+const FOLDER_PROMPT = "分析这个文件夹中的文件并总结重点。";
 const HUBSPOT_PROMPT =
-  "Create a report on my recent HubSpot leads: sources, stages, and who needs follow-up.";
+  "根据我最近的 HubSpot 潜在客户生成报告：整理来源、阶段以及需要跟进的对象。";
 const GH_SLACK_PROMPT =
-  "Set up a weekly progress report: summarize activity in my GitHub repos and post it to Slack every Friday morning.";
+  "设置每周进展报告：汇总 GitHub 仓库动态，并在每周五上午发布到 Slack。";
 
 export function SessionIntro({
   sessionId,
@@ -26,7 +33,6 @@ export function SessionIntro({
   onPrefill,
 }: {
   sessionId: string;
-  // Opens the §23 Session settings drawer (sources section) — the gated rows' Configure target.
   onOpenSessionSettings: () => void;
   onPrefill: (text: string, attachments?: Attachment[]) => void;
 }) {
@@ -36,17 +42,23 @@ export function SessionIntro({
   const [addingFolder, setAddingFolder] = useState(false);
 
   useEffect(() => {
-    // Live = what this session can touch right now (connected AND not muted here) — the same
-    // truth the §23 glance renders, so the dots here can never disagree with the row above.
     getSessionConnections(sessionId)
-      .then((c) => setLive(new Set(c.connected.filter((x) => x.enabled).map((x) => x.connector))))
+      .then((connections) =>
+        setLive(
+          new Set(
+            connections.connected.filter((connection) => connection.enabled).map((connection) => connection.connector),
+          ),
+        ),
+      )
       .catch(() => {});
     getConnectors()
-      .then((list) => setByName(indexConnectors(list)))
+      .then((connectors) => setByName(indexConnectors(connectors)))
       .catch(() => {});
   }, [sessionId]);
 
-  const shared = roots.filter((r) => !r.primary);
+  const shared = roots.filter((root) => !root.primary);
+  const hubspotAvailable = byName.hubspot?.available === true;
+  const ghSlackAvailable = byName.github?.available === true && byName.slack?.available === true;
   const hubspotReady = live.has("hubspot");
   const ghSlackReady = live.has("github") && live.has("slack");
 
@@ -57,28 +69,41 @@ export function SessionIntro({
   );
 
   const pickFolder = () => {
-    // A shared folder already exists → straight to the prompt; otherwise share one first.
     if (shared.length > 0) onPrefill(FOLDER_PROMPT);
-    else setAddingFolder((v) => !v);
+    else setAddingFolder((visible) => !visible);
   };
 
   return (
     <div className="intro">
       <h1 className="greeting">
-        <span className="mark">✦</span> What should we produce?
+        <span className="mark">✦</span> 今天想创作什么内容？
       </h1>
-      <p className="intro-lede">
-        Pick a task to start — I'll do the work and save the result. Or just type what you need
-        below.
-      </p>
+      <p className="intro-lede">选择一个工作流，文枢会先把请求填入输入框，等你确认后再开始。</p>
 
-      <div className="intro-tasks">
+      <div className="intro-tasks intro-content-recommendations">
+        {CONTENT_SUGGESTIONS.map((suggestion) => (
+          <button
+            className="task-card"
+            key={suggestion.title}
+            onClick={() => onPrefill(suggestion.title)}
+          >
+            <span className="task-card-body">
+              <span className="task-card-title">{suggestion.title}</span>
+              <span className="task-card-sub">{suggestion.detail}</span>
+            </span>
+            <span className="task-card-act">填入 →</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="suggest-head">准备资料来源（可选）</div>
+      <div className="intro-tasks intro-setup-actions">
         <button className="task-card" data-testid="intro-task-folder" onClick={pickFolder}>
           <span className="task-card-body">
-            <span className="task-card-title">Analyze the files in a directory</span>
-            <span className="task-card-sub">I'll read them and summarize what matters</span>
+            <span className="task-card-title">分析文件夹中的资料</span>
+            <span className="task-card-sub">读取文件并总结其中的重点</span>
           </span>
-          <span className="task-card-act">Pick a folder →</span>
+          <span className="task-card-act">选择文件夹 →</span>
         </button>
         {addingFolder && (
           <div className="intro-addfolder">
@@ -96,36 +121,40 @@ export function SessionIntro({
           </div>
         )}
 
+        {hubspotAvailable && (
         <button
           className={"task-card" + (hubspotReady ? "" : " gated")}
           data-testid="intro-task-hubspot"
           onClick={() => (hubspotReady ? onPrefill(HUBSPOT_PROMPT) : onOpenSessionSettings())}
         >
           <span className="task-card-body">
-            <span className="task-card-title">Create a report from my HubSpot leads</span>
+            <span className="task-card-title">根据 HubSpot 潜在客户生成报告</span>
             <span className="task-card-sub">
               {dot("hubspot", hubspotReady)}
-              Sources, stages, and who needs follow-up
+              整理来源、阶段和需要跟进的对象
             </span>
           </span>
-          <span className="task-card-act">{hubspotReady ? "Start →" : "Configure ›"}</span>
+          <span className="task-card-act">{hubspotReady ? "开始 →" : "配置 ›"}</span>
         </button>
+        )}
 
+        {ghSlackAvailable && (
         <button
           className={"task-card" + (ghSlackReady ? "" : " gated")}
           data-testid="intro-task-github-slack"
           onClick={() => (ghSlackReady ? onPrefill(GH_SLACK_PROMPT) : onOpenSessionSettings())}
         >
           <span className="task-card-body">
-            <span className="task-card-title">Automate a weekly GitHub progress report to Slack</span>
+            <span className="task-card-title">自动生成每周 GitHub 进展报告并发布到 Slack</span>
             <span className="task-card-sub">
               {dot("github", live.has("github"))}
               {dot("slack", live.has("slack"))}
-              Repo activity, summarized and posted every Friday
+              汇总仓库动态，并在每周五发布
             </span>
           </span>
-          <span className="task-card-act">{ghSlackReady ? "Start →" : "Configure ›"}</span>
+          <span className="task-card-act">{ghSlackReady ? "开始 →" : "配置 ›"}</span>
         </button>
+        )}
       </div>
     </div>
   );

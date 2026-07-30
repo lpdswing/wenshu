@@ -9,8 +9,7 @@ test("mid-session model switch shows the marker and later turns use the new mode
   page,
 }) => {
   await page.goto("/");
-  await page.getByText("Draft the launch note").first().click();
-  const box = page.getByPlaceholder(/Ask the coworker/);
+  const box = page.getByPlaceholder("告诉文枢你想完成什么...");
   await box.fill("hello there");
   await box.press("Enter");
   await expect(page.getByText("Echo: hello there", { exact: false }).first()).toBeVisible();
@@ -22,12 +21,39 @@ test("mid-session model switch shows the marker and later turns use the new mode
   await page.locator(".dd-item").filter({ hasText: "GPT-5.5" }).click();
 
   // The switch marker lands in the transcript…
-  await expect(page.getByText(/Model switched to gpt-5.5/).first()).toBeVisible();
+  await expect(page.getByText("已切换模型：gpt-5.5", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(/此模型无法读取之前的图片/)).toHaveCount(0);
 
   // …and the next message carries the new model (the fixture echoes it back).
   await box.fill("after the switch");
   await box.press("Enter");
   await expect(
     page.getByText("Echo: after the switch [model=gpt-5.5]", { exact: false }).first(),
+  ).toBeVisible();
+});
+
+test("live model switch localizes the image degradation warning", async ({ page }) => {
+  await page.goto("/");
+  const box = page.getByPlaceholder("告诉文枢你想完成什么...");
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "diagram.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("fixture-image"),
+  });
+  await box.fill("inspect this image");
+  await box.press("Enter");
+  await expect(page.getByText(/Echo: inspect this image/).first()).toBeVisible();
+
+  const picker = page.locator(".dd").filter({ hasText: "Claude Opus 4.8" });
+  await picker.locator(".pill").click();
+  await page.locator(".dd-item").filter({ hasText: "GPT-5.5" }).click();
+
+  await expect(
+    page
+      .getByText(
+        "已切换模型：gpt-5.5 — 此模型无法读取之前的图片",
+        { exact: true },
+      )
+      .first(),
   ).toBeVisible();
 });

@@ -9,6 +9,7 @@ import {
   updateAutomation,
   type Automation,
   type AutomationRun,
+  type ProductInfo,
 } from "../api";
 import { Icon } from "./Icon";
 import { PanelHead } from "./IntegrationsView";
@@ -59,11 +60,12 @@ interface Props {
     task?: { id: string; title: string },
   ) => void;
   onRunNow: (taskId: string, title?: string) => void;
+  features: ProductInfo["features"];
   // Open directly on a task's detail (set by the run banner's "Back to runs").
   initialOpenId?: string | null;
 }
 
-export function ScheduledView({ onOpenRun, onRunNow, initialOpenId }: Props) {
+export function ScheduledView({ onOpenRun, onRunNow, features, initialOpenId }: Props) {
   const [tasks, setTasks] = useState<Automation[]>([]);
   const [openId, setOpenId] = useState<string | null>(initialOpenId ?? null);
   const [showForm, setShowForm] = useState(false);
@@ -123,7 +125,7 @@ export function ScheduledView({ onOpenRun, onRunNow, initialOpenId }: Props) {
     <Shell>
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0">
-          <PanelHead title="Automations" sub="Recurring tasks OpenWorker runs on a schedule." />
+          <PanelHead title="Automations" sub="Recurring tasks 文枢 runs on a schedule." />
         </div>
         <button
           className="text-[12.5px] px-3 py-1.5 rounded-lg border border-lineStrong bg-panel hover:border-accent hover:text-accent shrink-0"
@@ -151,13 +153,19 @@ export function ScheduledView({ onOpenRun, onRunNow, initialOpenId }: Props) {
 
       {/* The quickstart (§29): ONE template system — role recipes + generic templates, each
           card with §27 connector dots; picking one expands the configure card. */}
-      {(empty || showForm) && <AutomationQuickstart busy={busy !== null} onCreate={create} />}
+      {(empty || showForm) && (
+        <AutomationQuickstart
+          busy={busy !== null}
+          features={features}
+          onCreate={create}
+        />
+      )}
 
       {empty ? (
         !showForm && (
           <div className={CARD + " p-4 text-[12.5px] text-muted"}>
             No scheduled tasks yet — use a template above, click <strong>+ New automation</strong>,
-            or just ask OpenWorker in a session.
+            or just ask 文枢 in a session.
           </div>
         )
       ) : (

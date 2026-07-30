@@ -2,12 +2,11 @@
 // Default/Sandbox/access tags, the add-modal with One click (read | write
 // consent radios) | Manual private-app pills, and the hidden-fields denylist.
 import { expect } from "@playwright/test";
-import { test } from "./fixtures";
+import { openAccountPage, test } from "./fixtures";
 
 async function openConnectors(page) {
-  await page.goto("/");
-  await page.getByTestId("account-row").click();
-  await page.getByRole("button", { name: "Connectors", exact: true }).click();
+  await openAccountPage(page, "connectors");
+  
 }
 
 async function signIn(page) {

@@ -15,6 +15,7 @@ Today: `openai` (the default, with an optional custom endpoint that covers Azure
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -24,6 +25,14 @@ from .gemini_provider import GeminiProvider
 from .openai_provider import OpenAIProvider
 
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
+
+DEFAULT_OPENAI_IMAGE_MODEL = "gpt-image-2"
+OPENAI_IMAGE_MODELS = (
+    "gpt-image-2",
+    "gpt-image-1.5",
+    "gpt-image-1",
+)
+_CUSTOM_MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}\Z")
 
 
 @dataclass(frozen=True)
@@ -39,6 +48,7 @@ class ProviderField:
     # Pre-filled (still editable) form value — e.g. an OpenAI-compatible vendor's official
     # endpoint, so the user only has to paste a key. Distinct from `placeholder` (grey hint).
     default: str = ""
+    options: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -49,6 +59,7 @@ class ProviderField:
             "help": self.help,
             "placeholder": self.placeholder,
             "default": self.default,
+            "options": list(self.options),
         }
 
 
@@ -79,6 +90,18 @@ class ProviderDescriptor:
             "recommended_model": self.recommended_model,
             "blurb": self.blurb,
         }
+
+
+def normalize_openai_image_model(value: Any) -> str:
+    """Normalize a known or custom OpenAI image model id without accepting control/space."""
+    if value is None or value == "":
+        return DEFAULT_OPENAI_IMAGE_MODEL
+    if not isinstance(value, str):
+        raise ValueError("image_model must be a string")
+    model = value.strip()
+    if not model or _CUSTOM_MODEL_ID.fullmatch(model) is None:
+        raise ValueError("image_model must be a non-empty model id")
+    return model
 
 
 def _normalize_ollama_url(url: Optional[str]) -> str:
@@ -204,6 +227,14 @@ DESCRIPTORS: list[ProviderDescriptor] = [
                 "OpenAI API key",
                 secret=True,
                 placeholder="sk-…",
+            ),
+            ProviderField(
+                "image_model",
+                "图片模型",
+                required=False,
+                help="用于封面和正文配图，与对话模型分开设置；也可输入自定义模型 ID。",
+                default=DEFAULT_OPENAI_IMAGE_MODEL,
+                options=OPENAI_IMAGE_MODELS,
             ),
             ProviderField(
                 "base_url",

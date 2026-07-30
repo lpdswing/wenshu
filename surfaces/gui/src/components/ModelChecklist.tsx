@@ -72,7 +72,7 @@ export function ModelChecklist({
                 type="checkbox"
                 checked={checked(id)}
                 disabled={isDefault}
-                title={isDefault ? "The default model is always shown — make another model default first" : undefined}
+                title={isDefault ? "默认模型始终显示；请先将其他模型设为默认" : undefined}
                 onChange={(e) => tick(id, e.target.checked)}
               />
               <span className="mlist-name" title={id}>
@@ -80,10 +80,10 @@ export function ModelChecklist({
               </span>
             </label>
             {isDefault ? (
-              <span className="mlist-default">default</span>
+              <span className="mlist-default">默认</span>
             ) : (
               <button className="mlist-make" onClick={() => makeDefault(id)}>
-                Make default
+                设为默认
               </button>
             )}
           </div>
@@ -91,7 +91,7 @@ export function ModelChecklist({
       })}
       <div className="mlist-add">
         <input
-          placeholder="Add another model…"
+          placeholder="添加其他模型…"
           value={draft}
           spellCheck={false}
           autoComplete="off"
@@ -99,7 +99,7 @@ export function ModelChecklist({
           onKeyDown={(e) => e.key === "Enter" && add()}
         />
         <button className="btn-primary sm" onClick={add} disabled={!draft.trim()}>
-          Add
+          添加
         </button>
       </div>
     </div>

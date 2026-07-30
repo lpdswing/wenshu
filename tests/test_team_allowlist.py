@@ -33,8 +33,10 @@ class ScriptedProvider(ProviderClient):
         return ModelCapabilities()
 
 
-def _relay_manager(tmp_path, *, teams=("T1",)) -> SessionManager:
-    m = SessionManager(data_dir=tmp_path / "data", provider=ScriptedProvider())
+def _relay_manager(tmp_path, *, teams=("T1",), product=None) -> SessionManager:
+    m = SessionManager(
+        data_dir=tmp_path / "data", provider=ScriptedProvider(), product=product
+    )
     for t in teams:
         m.secrets.put(
             f"slack:team:{t}",
@@ -190,8 +192,10 @@ async def test_resolve_teamless_parked_uses_flat_list(tmp_path):
 
 
 # -- REST + connector_list surface ------------------------------------------------
-def test_rest_allow_with_team_and_workspaces_field(tmp_path):
-    m = _relay_manager(tmp_path, teams=("T1", "T2"))
+def test_rest_allow_with_team_and_workspaces_field(tmp_path, permissive_product):
+    m = _relay_manager(
+        tmp_path, teams=("T1", "T2"), product=permissive_product
+    )
     client = TestClient(create_app(m))
 
     r = client.post(

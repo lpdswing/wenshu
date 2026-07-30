@@ -18,6 +18,7 @@ import { GithubDetail } from "./GithubDetail";
 import { GmailDetail } from "./GmailDetail";
 import { HubSpotDetail } from "./HubSpotDetail";
 import { SlackDetail } from "./SlackDetail";
+import { WechatDetail } from "./WechatDetail";
 import { GRP } from "./ui";
 
 // Connectors surface = LIST ⇄ per-connector DETAIL SUBPAGE (UX-DECISIONS §21). The
@@ -39,6 +40,7 @@ const DETAIL_PAGES: Record<string, (p: DetailProps) => JSX.Element> = {
   google_calendar: (p) => <CalendarDetail {...p} />,
   hubspot: (p) => <HubSpotDetail {...p} />,
   github: (p) => <GithubDetail {...p} />,
+  wechat_official: (p) => <WechatDetail {...p} />,
   // Generic multi-account connectors (accounts.py layer) share one page.
   notion: (p) => <AccountsDetail {...p} />,
   attio: (p) => <AccountsDetail {...p} />,
@@ -82,6 +84,10 @@ export function ConnectorsSection() {
         </button>
         {!c ? (
           <div className="text-[13px] text-muted">Loading…</div>
+        ) : detail === "wechat_official" && Page ? (
+          /* WeChat owns both sides of its narrow detail route: its credential
+             form before connect and comment settings after connect. */
+          <Page c={c} cloud={cloud} slack={slack} onChanged={refresh} />
         ) : !c.connected ? (
           /* Pre-connect page (§38). When a connect completes, the poll flips
              c.connected and this same route re-renders as the connected page. */

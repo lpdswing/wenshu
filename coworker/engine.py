@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import inspect
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, AsyncIterator, Awaitable, Callable, Optional
@@ -40,6 +42,8 @@ class PermissionRequest:
     metadata: Any
     reason: str
     tool_call_id: Optional[str] = None  # for durable resume (idempotent inbox item)
+    display_arguments: Optional[dict[str, Any]] = None
+    approval_once_only: bool = False
 
 
 Approver = Callable[[PermissionRequest], Awaitable[ApprovalOutcome]]
@@ -523,6 +527,23 @@ class TurnEngine:
             metadata, "requires_approval", False
         )
 
+    @staticmethod
+    def _approval_display_arguments(
+        spec: Any,
+        arguments: dict[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        callback = getattr(spec, "approval_arguments", None)
+        if callback is None:
+            return None
+        try:
+            display_fields = callback(dict(arguments))
+            if not isinstance(display_fields, Mapping):
+                return None
+            return dict(display_fields)
+        except Exception:
+            return None
+
+
     async def _authorize(self, tool_call: ToolCall) -> "AsyncIterator[Event | bool]":
         """Permission flow for one call (TOOL_PROPOSED is emitted by the caller). Yields
         its events, then True/False (allowed) last. Denied/unknown calls get their
@@ -537,6 +558,11 @@ class TurnEngine:
         )
         allowed = decision.allowed
         reason = decision.reason
+        needs_user = decision.needs_user
+        if allowed and spec and spec.approval_once_only:
+            allowed = False
+            needs_user = True
+            reason = "requires one-time approval"
 
         if allowed and decision.rule:
             # A task-scoped standing rule auto-allowed this call: audit the exact rule
@@ -547,13 +573,21 @@ class TurnEngine:
                 tool_call, stage="auto_allowed", status="allowed", reason=reason
             )
 
-        if not allowed and decision.needs_user:
+        if not allowed and needs_user:
+            display_arguments = self._approval_display_arguments(
+                spec,
+                tool_call.arguments,
+            )
             yield Event(
                 EventType.PERMISSION_REQUIRED,
                 {
                     "name": tool_call.name,
-                    "arguments": tool_call.arguments,
-                    "reason": decision.reason,
+                    "arguments": (
+                        display_arguments
+                        if display_arguments is not None
+                        else tool_call.arguments
+                    ),
+                    "reason": reason,
                     "category": getattr(metadata, "category", ""),
                     # The exact target a standing rule could pin, or None when the call
                     # isn't eligible (no declared target arg / exec risk). Surfaces use it
@@ -564,22 +598,42 @@ class TurnEngine:
                         metadata,
                         self.permissions.risk_overrides,
                     ),
+                    "approval_once_only": bool(
+                        spec and spec.approval_once_only
+                    ),
                 },
             )
-            self._audit(tool_call, stage="approval_requested", reason=decision.reason)
+            self._audit(tool_call, stage="approval_requested", reason=reason)
             outcome = await self._interruptible(
                 self.approver(
                     PermissionRequest(
                         tool_name=tool_call.name,
                         arguments=tool_call.arguments,
                         metadata=metadata,
-                        reason=decision.reason,
+                        reason=reason,
                         tool_call_id=tool_call.id,
+                        display_arguments=display_arguments,
+                        approval_once_only=bool(spec and spec.approval_once_only),
                     )
                 ),
                 interrupted=ApprovalOutcome.DENY,
             )
-            if outcome is ApprovalOutcome.DENY:
+            persistent_rejected = bool(
+                spec
+                and spec.approval_once_only
+                and outcome not in {ApprovalOutcome.ONCE, ApprovalOutcome.DENY}
+            )
+            if persistent_rejected:
+                allowed = False
+                reason = "persistent approval is not allowed for this tool"
+                self._audit(
+                    tool_call,
+                    stage="approval_resolved",
+                    status="denied",
+                    approval=outcome.value,
+                    reason=reason,
+                )
+            elif outcome is ApprovalOutcome.DENY:
                 allowed, reason = (
                     False,
                     "interrupted by user" if self._cancel.is_set() else "denied by user",
@@ -633,9 +687,12 @@ class TurnEngine:
         yield True
 
     def _execute_sync(self, tool_call: ToolCall) -> tuple[Any, str]:
-        """Execute one authorized call (runs in a worker thread)."""
+        """Execute one authorized call in a worker thread, awaiting async tools there."""
         try:
-            return self.registry.execute(tool_call.name, tool_call.arguments), "ok"
+            result = self.registry.execute(tool_call.name, tool_call.arguments)
+            if inspect.isawaitable(result):
+                result = asyncio.run(result)
+            return result, "ok"
         except Exception as exc:
             return {"error": str(exc), "error_type": type(exc).__name__}, "error"
 

@@ -33,6 +33,42 @@ describe("itemsFromMessages _display sidecar", () => {
   });
 });
 
+  it("preserves structured WeChat result display metadata on replay", () => {
+    const summary = {
+      status: "unknown",
+      title: "文枢内容流水线",
+      error_kind: "transport",
+      uploaded_asset_count: 3,
+      draft_only: true,
+    };
+    const items = itemsFromMessages([
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          {
+            id: "wechat-call",
+            function: {
+              name: "create_wechat_draft",
+              arguments: '{"article_path":"article.md"}',
+            },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        tool_call_id: "wechat-call",
+        content: '{"status":"unknown","title":"truncated',
+        _display: { wechat_draft_result: summary },
+      },
+    ]);
+
+    const tool = items.find((item) => item.kind === "tool");
+    expect(tool?.kind).toBe("tool");
+    if (tool?.kind !== "tool") throw new Error("tool item missing");
+    expect(tool.display?.wechat_draft_result).toEqual(summary);
+  });
+
 describe("itemsFromMessages timestamps", () => {
   it("carries the server ts through to user/assistant items; pre-stamp history gets none", () => {
     const items = itemsFromMessages([
@@ -62,9 +98,9 @@ describe("itemsFromMessages notices", () => {
     expect(items).toEqual([
       { kind: "user", text: "hi" },
       { kind: "assistant", text: "partial ans" },
-      { kind: "notice", tone: "warn", text: "Interrupted." },
+      { kind: "notice", tone: "warn", text: "已中断。" },
       { kind: "user", text: "again" },
-      { kind: "notice", tone: "warn", text: "Error: model down", retriable: true },
+      { kind: "notice", tone: "warn", text: "错误：model down", retriable: true },
     ]);
   });
 });
@@ -78,7 +114,22 @@ describe("itemsFromMessages model switch", () => {
     expect(items[1]).toEqual({
       kind: "notice",
       tone: "info",
-      text: "Model switched to Kimi K2.6 · Moonshot",
+      text: "已切换模型：Kimi K2.6 · Moonshot",
+    });
+  });
+
+  it("translates the persisted image warning without changing the model label", () => {
+    const items = itemsFromMessages([
+      {
+        role: "notice",
+        kind: "model_switch",
+        text: "Model switched to Claude Opus 4.8 · Anthropic — earlier images can't be read by this model",
+      },
+    ]);
+    expect(items[0]).toEqual({
+      kind: "notice",
+      tone: "info",
+      text: "已切换模型：Claude Opus 4.8 · Anthropic — 此模型无法读取之前的图片",
     });
   });
 });

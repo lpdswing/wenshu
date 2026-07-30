@@ -17,18 +17,18 @@ test("top-left cluster renders only while the sidebar is collapsed", async ({ pa
   await page.keyboard.press("Meta+b");
   const cluster = page.getByTestId("topbar-cluster");
   await expect(cluster).toBeVisible();
-  await expect(cluster.getByRole("button", { name: "Show sidebar" })).toBeVisible();
-  await expect(cluster.getByRole("button", { name: "New session" })).toBeVisible();
-  await expect(cluster.getByRole("button", { name: "Search" })).toBeVisible();
+  await expect(cluster.getByRole("button", { name: "显示侧边栏" })).toBeVisible();
+  await expect(cluster.getByRole("button", { name: "新建会话" })).toBeVisible();
+  await expect(cluster.getByRole("button", { name: "搜索" })).toBeVisible();
   await expect(page.locator(".nav-reveal-btn")).toHaveCount(0);
 
   // The cluster's search opens the command-palette overlay.
-  await cluster.getByRole("button", { name: "Search" }).click();
-  await expect(page.getByPlaceholder("Search chats")).toBeVisible();
+  await cluster.getByRole("button", { name: "搜索" }).click();
+  await expect(page.getByPlaceholder("搜索会话")).toBeVisible();
   await page.keyboard.press("Escape");
 
   // The cluster's sidebar button docks the nav back — and the cluster leaves with it.
-  await cluster.getByRole("button", { name: "Show sidebar" }).click();
+  await cluster.getByRole("button", { name: "显示侧边栏" }).click();
   await expect(page.locator(".app")).not.toHaveClass(/nav-collapsed/);
   await expect(page.getByTestId("topbar-cluster")).toHaveCount(0);
 });
@@ -46,9 +46,9 @@ test("facts subtitle: absent on a fresh session, model-only after the first turn
 
   // First turn → the facts move up to the subtitle; the picker STAYS in the composer
   // (§17 rev 2026-07-22: mid-session model switching shipped, so it remains actionable).
-  const box = page.getByPlaceholder(/Ask the coworker/);
+  const box = page.getByPlaceholder("告诉文枢你想完成什么...");
   await box.fill("hello");
-  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "发送" }).click();
   await expect(page.getByText(/Echo: hello/)).toBeVisible();
 
   // Model only — no persona name (owner ask 2026-07-22: personas are hidden this release),
@@ -64,11 +64,10 @@ test("composer is three controls (+ attach · Mode · send); folder and branch c
   page,
 }) => {
   await page.goto("/");
-  await page.getByText("Draft the launch note").first().click();
 
-  await expect(page.getByRole("button", { name: "Attach" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Mode", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "添加附件" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "权限模式", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "发送" })).toBeVisible();
   // The folder/roots popover trigger and the standalone Inbox control left the composer (§22).
   await expect(page.getByTitle(/director(y|ies) the agent can use/)).toHaveCount(0);
   await expect(page.getByTitle("Inbox routing")).toHaveCount(0);

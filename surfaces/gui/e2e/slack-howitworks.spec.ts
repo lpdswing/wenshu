@@ -2,12 +2,10 @@
 // allow-list ("you" chip), status line, 3-tab animated how-it-works carousel
 // (no "Listen to a channel" — deferred by owner call), collapse persisted locally.
 import { expect } from "@playwright/test";
-import { test } from "./fixtures";
+import { openAccountPage, test } from "./fixtures";
 
 async function openSlackPage(page) {
-  await page.goto("/");
-  await page.getByTestId("account-row").click();
-  await page.getByRole("button", { name: "Connectors", exact: true }).click();
+  await openAccountPage(page, "connectors");
   await page.getByTestId("connector-slack").click();
 }
 

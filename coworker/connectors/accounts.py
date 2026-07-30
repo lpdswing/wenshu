@@ -23,6 +23,7 @@ from ..secrets import SecretStore
 from .descriptors import ConnectorDescriptor, get_descriptor
 
 IDENTITY = "@identity"
+_SINGLE_ACCOUNT_CONNECTORS = frozenset({"wechat_official"})
 
 
 def prefix(connector: str) -> str:
@@ -40,7 +41,7 @@ def _norm(value: Any) -> str:
 
 def is_account_connector(name: str) -> bool:
     d = get_descriptor(name)
-    return bool(d and d.account_field)
+    return bool(d and d.account_field and name not in _SINGLE_ACCOUNT_CONNECTORS)
 
 
 def derive_account_id(d: ConnectorDescriptor, profile: dict[str, Any]) -> str:

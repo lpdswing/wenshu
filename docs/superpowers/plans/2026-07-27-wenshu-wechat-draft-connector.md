@@ -425,7 +425,7 @@ git commit -m "feat: create idempotent WeChat drafts"
 - Modify: `coworker/connectors/integration_tools.py`
 - Modify: `coworker/connectors/tool_defs.py`
 - Modify: `coworker/risk.py`
-- Modify: `tests/test_integration_tools.py`
+- Create: `tests/test_integration_tools.py`
 - Modify: `tests/test_permissions_risk.py`
 
 **Interfaces:**
@@ -481,7 +481,7 @@ git commit -m "feat: expose approved WeChat draft tools"
 - Modify: `surfaces/gui/src/components/ApprovalCard.tsx`
 - Modify: `surfaces/gui/src/components/ApprovalCard.test.tsx`
 - Modify: `surfaces/gui/e2e/approval-card.spec.ts`
-- Modify: `surfaces/gui/e2e/artifact-preview.spec.ts`
+- Create: `surfaces/gui/e2e/artifact-preview.spec.ts`
 
 **Interfaces:**
 - Produces: create Tool 卡片显示公众号、标题、摘要、封面、正文图数量、theme/color 和“只保存到草稿箱”。

@@ -2,19 +2,15 @@
 // navigates to it, and the §19 flows — parked senders (Allow & deliver / Allow / ×)
 // and "listening" sessions — are filed under the workspace they belong to.
 import { expect } from "@playwright/test";
-import { test } from "./fixtures";
+import { openAccountPage, test } from "./fixtures";
 
 async function openSlackPage(page) {
-  await page.goto("/");
-  await page.getByTestId("account-row").click();
-  await page.getByRole("button", { name: "Connectors", exact: true }).click();
+  await openAccountPage(page, "connectors");
   await page.getByTestId("connector-slack").click();
 }
 
 test("list row status + navigation to the Slack page", async ({ page }) => {
-  await page.goto("/");
-  await page.getByTestId("account-row").click();
-  await page.getByRole("button", { name: "Connectors", exact: true }).click();
+  await openAccountPage(page, "connectors");
 
   const row = page.getByTestId("connector-slack");
   await expect(row).toContainText("2 workspaces · relay");

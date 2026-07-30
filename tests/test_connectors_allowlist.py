@@ -44,8 +44,10 @@ def _slack(connectors):
     return next(c for c in connectors if c["name"] == "slack")
 
 
-def test_connectors_carry_allowlist_and_recent(tmp_path):
-    mgr = SessionManager(workspace=tmp_path, provider=ScriptedProvider())
+def test_connectors_carry_allowlist_and_recent(tmp_path, permissive_product):
+    mgr = SessionManager(
+        workspace=tmp_path, provider=ScriptedProvider(), product=permissive_product
+    )
     _connected_slack(mgr, allowed=["U_OK"])
     mgr.gateway = _Gateway(
         recent=[
@@ -75,8 +77,10 @@ def test_connectors_carry_allowlist_and_recent(tmp_path):
     assert by_id["U_NEW"]["authorized"] is False
 
 
-def test_allow_then_disallow_mutates_list(tmp_path):
-    mgr = SessionManager(workspace=tmp_path, provider=ScriptedProvider())
+def test_allow_then_disallow_mutates_list(tmp_path, permissive_product):
+    mgr = SessionManager(
+        workspace=tmp_path, provider=ScriptedProvider(), product=permissive_product
+    )
     _connected_slack(mgr)
     mgr.gateway = _Gateway(recent=[])
     client = TestClient(create_app(mgr))
@@ -92,9 +96,11 @@ def test_allow_then_disallow_mutates_list(tmp_path):
     )
 
 
-def test_recent_absent_when_no_gateway(tmp_path):
+def test_recent_absent_when_no_gateway(tmp_path, permissive_product):
     # No gateway running (server started without messaging) → no recent senders, still no crash.
-    mgr = SessionManager(workspace=tmp_path, provider=ScriptedProvider())
+    mgr = SessionManager(
+        workspace=tmp_path, provider=ScriptedProvider(), product=permissive_product
+    )
     _connected_slack(mgr)
     mgr.gateway = None
     client = TestClient(create_app(mgr))

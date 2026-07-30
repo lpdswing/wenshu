@@ -32,8 +32,26 @@ def test_cowork_persona_matches_builder(tmp_path):
     reg = PersonaRegistry()
     ctx = _ctx(tmp_path)
     assert _names(reg.agent("cowork"), ctx) == _names(cowork_agent(), ctx)
-    a = reg.agent("cowork")
-    assert a.messaging and a.connectors
+    agent = reg.agent("cowork")
+    assert agent.messaging and agent.connectors and agent.content_tools
+
+
+def test_default_persona_is_wenshu_content_assistant(tmp_path):
+    registry = PersonaRegistry(state_path=tmp_path / "personas.json")
+    row = next(persona for persona in registry.list_all() if persona["id"] == "cowork")
+    agent = registry.agent("cowork")
+
+    assert row["id"] == agent.name == "cowork"
+    assert row["name"] == agent.title == "文枢内容助手"
+    assert row["tagline"] == "整理资料、撰写文章并交付内容成果"
+    assert "资料" in agent.system_prompt
+    assert "公众号" in agent.system_prompt
+    assert "prepare_article_review" in agent.system_prompt
+    assert "generate_article_assets" in agent.system_prompt
+    assert "reviewed_hash" in agent.system_prompt
+    assert "prepare_wechat_draft" in agent.system_prompt
+    assert "create_wechat_draft" in agent.system_prompt
+    assert "write_article" not in agent.system_prompt
 
 
 def test_ops_persona_composes_knowledge_toolset(tmp_path):
@@ -43,6 +61,7 @@ def test_ops_persona_composes_knowledge_toolset(tmp_path):
     assert _names(reg.agent("ops"), ctx) == _names(cowork_agent(), ctx)
     a = reg.agent("ops")
     assert a.family == "knowledge" and a.messaging and a.connectors
+    assert not a.content_tools
     assert "read_file_lines" in _names(a, ctx)  # multi-root knowledge files
 
 

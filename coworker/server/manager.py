@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -72,10 +73,14 @@ from ..mcp import (
 from ..memory import MemoryStore, Scope, SQLiteMemoryStore
 from ..permissions import Mode
 from ..agents import list_agents as _list_agents
+from ..image_generation import ImageAuthError, build_image_provider
+from ..product import ProductProfile, current_product
 from ..providers import (
+    DEFAULT_OPENAI_IMAGE_MODEL,
     ProviderClient,
     ProviderRouter,
     get_descriptor,
+    normalize_openai_image_model,
     provider_descriptors,
     verify_provider_key,
 )
@@ -84,6 +89,10 @@ from ..sessions import SessionRecord
 from ..skills import SkillLoader
 
 _SCOPES = {s.value for s in Scope}
+_WECHAT_OFFICIAL_SETTINGS = frozenset(
+    {"need_open_comment", "only_fans_can_comment"}
+)
+_WECHAT_OFFICIAL_DISCONNECTED = "微信公众号尚未连接"
 
 logger = logging.getLogger("coworker.manager")
 
@@ -95,12 +104,20 @@ def _grants_of(engine) -> dict[str, Any]:
     return {"tools": tools, "commands": commands} if (tools or commands) else {}
 
 
+def _presented_arguments(request) -> dict[str, Any]:
+    display_arguments = getattr(request, "display_arguments", None)
+    if isinstance(display_arguments, dict):
+        return display_arguments
+    arguments = getattr(request, "arguments", None)
+    return arguments if isinstance(arguments, dict) else {}
+
+
 def _approval_body(request) -> str:
     """Approval card body: the tool's reason (if any) plus a compact preview of its args, so a
     mirrored 'Run `write_file`?' shows the path/content rather than just the tool name.
     """
     reason = (getattr(request, "reason", "") or "").strip()
-    preview = args_preview(getattr(request, "arguments", None))
+    preview = args_preview(_presented_arguments(request))
     return "\n".join(p for p in (reason, preview) if p)
 
 
@@ -113,6 +130,7 @@ class SessionManager:
         model: str = "gpt-5.6-sol",
         mode: Mode = Mode.INTERACTIVE,
         provider: Optional[ProviderClient] = None,
+        product: ProductProfile | None = None,
     ) -> None:
         self.default_workspace = (
             str(Path(workspace).expanduser().resolve()) if workspace else None
@@ -120,6 +138,7 @@ class SessionManager:
         self.model = model
         self.mode = mode
         self.provider = provider
+        self.product = product or current_product()
 
         if data_dir is not None:
             base = Path(data_dir).expanduser()
@@ -145,6 +164,9 @@ class SessionManager:
         self._autotitle_attempts: dict[str, int] = {}
         self.workspace_trust = WorkspaceTrustStore()
         self.secrets = SecretStore()
+        # Connector profile mutations are read/merge/write operations. Serialize them at
+        # the manager boundary while SecretStore keeps each file replacement atomic.
+        self._connector_lock = threading.Lock()
         # No explicit provider injected → route by the model's `provider:` prefix (OpenAI default,
         # Ollama, …). Tests inject a provider directly and bypass the router. The same router is
         # shared by every engine and the `/v1/chat/completions` proxy.
@@ -326,12 +348,21 @@ class SessionManager:
             out.append({"path": path, "name": p.name, "exists": p.is_dir()})
         return out
 
-    DEFAULT_SCRATCH_BASE = "~/OpenWorker"
+    DEFAULT_SCRATCH_BASE = "~/WenShu"
+    LEGACY_SCRATCH_BASE = "~/OpenWorker"
+
+    def _scratch_base_setting(self) -> str:
+        """Configured path, or a compatibility-safe default for an existing installation."""
+        configured = self._prefs.get("scratch_base")
+        if configured:
+            return str(configured)
+        if Path(self.LEGACY_SCRATCH_BASE).expanduser().is_dir():
+            return self.LEGACY_SCRATCH_BASE
+        return self.DEFAULT_SCRATCH_BASE
 
     def scratch_base(self) -> Path:
         """Common area for per-conversation scratch directories. Configurable via prefs."""
-        base = self._prefs.get("scratch_base") or self.DEFAULT_SCRATCH_BASE
-        return Path(base).expanduser()
+        return Path(self._scratch_base_setting()).expanduser()
 
     def _provision_scratch(self, session_id: str) -> str:
         """Create (idempotently) and return this conversation's scratch directory."""
@@ -425,6 +456,7 @@ class SessionManager:
             messages=messages,
             extra_tools=extra_tools,
             secrets=self.secrets,
+            product=self.product,
             task_store=self.task_store,
             wake_store=self.wakes,
             session_id=session_id,
@@ -460,7 +492,7 @@ class SessionManager:
         if record is not None and record.grants:
             self._apply_grants(engine, record.grants)
         self._engines[session_id] = engine
-        if is_new_session:
+        if is_new_session and self.product.features.get("cloud", False):
             self._emit_session_created(session_id, agent_name)
         return engine
 
@@ -511,24 +543,9 @@ class SessionManager:
     def effective_connectors(
         self, session_id: str, persona_id: Optional[str] = None
     ) -> set[str]:
-        """The connectors effectively enabled for this session (§4.1): connected AND not muted by
-        the session override / persona default. Drives the engine's connector-tool gating; seeds the
-        persona defaults from the manifest on first read using the full connected set.
-        """
-        persona = self._persona_of(session_id, persona_id)
-        connected = {c["name"] for c in connector_list(self.secrets) if c["connected"]}
-        entry = self.personas.get(persona)
-        manifest = entry.manifest if entry else None
-        persona_defaults = self.persona_connections.defaults_for(
-            persona, manifest, connected=connected
-        )
-        session_overrides = self.session_connections.get(session_id)
-        return set(
-            effective_connections(
-                connected=connected,
-                persona_defaults=persona_defaults,
-                session_overrides=session_overrides,
-            )
+        """Product-visible connectors effectively enabled for this session (§4.1)."""
+        return self._resolve_effective_connectors(
+            session_id, persona_id, self._connected_connectors()
         )
 
     def _inbound_connector_allowed(self, session_id: str, connector: str) -> bool:
@@ -553,9 +570,49 @@ class SessionManager:
             return "none"
         return "git" if entry.family == "code" else "deliverable"
 
+    def _product_connector_rows(self) -> list[dict[str, Any]]:
+        """Connector metadata scoped before any credential-backed profile is inspected."""
+        return connector_list(
+            self.secrets, platforms=self.product.visible_connectors
+        )
+
     def _connected_connectors(self) -> set[str]:
-        """The account-connected connector names (the first layer of the §4 hierarchy)."""
-        return {c["name"] for c in connector_list(self.secrets) if c["connected"]}
+        """Product-visible, account-connected connector names (layer one of §4)."""
+        return {
+            connector["name"]
+            for connector in self._product_connector_rows()
+            if connector["connected"]
+        }
+
+    def _resolve_effective_connectors(
+        self,
+        session_id: str,
+        persona_id: Optional[str],
+        connected: set[str],
+    ) -> set[str]:
+        persona = self._persona_of(session_id, persona_id)
+        entry = self.personas.get(persona)
+        manifest = entry.manifest if entry else None
+        visible = self.product.visible_connectors
+        persona_defaults = {
+            connector: enabled
+            for connector, enabled in self.persona_connections.defaults_for(
+                persona, manifest, connected=connected
+            ).items()
+            if connector in visible
+        }
+        session_overrides = {
+            connector: enabled
+            for connector, enabled in self.session_connections.get(session_id).items()
+            if connector in visible
+        }
+        return set(
+            effective_connections(
+                connected=connected,
+                persona_defaults=persona_defaults,
+                session_overrides=session_overrides,
+            )
+        )
 
     def _persona_default_connections(
         self, persona_id: str, manifest, connected: set[str]
@@ -569,6 +626,7 @@ class SessionManager:
         return [
             {"connector": c, "enabled": bool(enabled), "connected": c in connected}
             for c, enabled in defaults.items()
+            if c in self.product.visible_connectors
         ]
 
     def persona_detail(self, persona_id: str) -> Optional[dict[str, Any]]:
@@ -589,6 +647,8 @@ class SessionManager:
                 "connected": rec.ref in connected,
             }
             for rec in (manifest.recommends if manifest else [])
+            if rec.kind != "connector"
+            or rec.ref in self.product.visible_connectors
         ]
         return {
             "id": entry.id,
@@ -616,6 +676,11 @@ class SessionManager:
         first so the stored row stays complete (the edit overlays the full seed rather than
         collapsing the row to this one connector), then returns the refreshed default_connections
         so the client can re-render without a second GET."""
+        if connector not in self.product.visible_connectors:
+            return {
+                "ok": False,
+                "error": f"connector not available in this product: {connector}",
+            }
         entry = self.personas.get(persona_id)
         if entry is None:
             return {"ok": False, "error": f"unknown persona: {persona_id}"}
@@ -685,10 +750,12 @@ class SessionManager:
         persona = self._persona_of(session_id, persona_id)
         entry = self.personas.get(persona)
         manifest = entry.manifest if entry else None
-        connectors = connector_list(self.secrets)
+        connectors = self._product_connector_rows()
         by_name = {c["name"]: c for c in connectors}
         connected_names = {c["name"] for c in connectors if c["connected"]}
-        effective = self.effective_connectors(session_id, persona)
+        effective = self._resolve_effective_connectors(
+            session_id, persona, connected_names
+        )
         connected = [
             {
                 "connector": name,
@@ -705,12 +772,38 @@ class SessionManager:
                 "connected": False,
             }
             for rec in (manifest.recommends if manifest else [])
-            if rec.kind == "connector" and rec.ref not in connected_names
+            if rec.kind == "connector"
+            and rec.ref in self.product.visible_connectors
+            and rec.ref not in connected_names
         ]
         return {
             "connected": connected,
             "recommended": recommended,
             "attention": sum(1 for r in recommended if not r["connected"]),
+        }
+
+    def set_session_connection(
+        self,
+        session_id: str,
+        connector: str,
+        *,
+        enabled: bool,
+        clear: bool = False,
+        persona_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Apply one product-visible session override and return the refreshed view."""
+        if connector not in self.product.visible_connectors:
+            return {
+                "ok": False,
+                "error": f"connector not available in this product: {connector}",
+            }
+        if clear:
+            self.session_connections.clear(session_id, connector)
+        else:
+            self.session_connections.set(session_id, connector, bool(enabled))
+        return {
+            "ok": True,
+            "connections": self.session_connections_view(session_id, persona_id),
         }
 
     def inbox_question_asker(self, session_id: str, agent: str):
@@ -895,6 +988,8 @@ class SessionManager:
             descriptor = get_descriptor(server.name)
             backed = descriptor is not None and bool(descriptor.mcp_url)
             if backed:
+                if server.name not in self.product.visible_connectors:
+                    continue
                 # Connector-backed server: obey the same gates as connector tools —
                 # the session's effective connector set and the per-tool toggles.
                 # The descriptor's PIN is authoritative over whatever the config
@@ -1016,6 +1111,11 @@ class SessionManager:
         """One-click connect for an MCP-BACKED connector (descriptor.mcp_url): seed
         the global server entry pinned to the curated allowlist, run the browser
         OAuth flow, and mark the connector profile `mode: "mcp"` on success."""
+        if name not in self.product.visible_connectors:
+            return {
+                "ok": False,
+                "error": f"connector not available in this product: {name}",
+            }
         from ..connectors.descriptors import get_descriptor
         from ..connectors.tool_defs import mcp_pinned_tools
 
@@ -1099,7 +1199,7 @@ class SessionManager:
     def list_connectors(self) -> list[dict[str, Any]]:
         # Enrich two-way connectors with the live gateway's recently-seen senders, so the Connectors
         # tab can manage the allow-list inline (each recent sender flagged authorized or not).
-        connectors = connector_list(self.secrets)
+        connectors = self._product_connector_rows()
         for c in connectors:
             if not (c.get("two_way") and c.get("connected")):
                 continue
@@ -1145,18 +1245,96 @@ class SessionManager:
     def connect_connector(
         self, name: str, fields: dict[str, Any], *, acknowledged: bool = False
     ) -> dict[str, Any]:
-        # validates the token by a live API call (sync httpx) — run off the event loop
-        return connect_connector(self.secrets, name, fields, acknowledged=acknowledged)
+        if name not in self.product.visible_connectors:
+            return {
+                "ok": False,
+                "error": f"connector not available in this product: {name}",
+            }
+        # Validation does a blocking API call. The REST layer runs this method in a
+        # worker thread; serialize the following profile write with settings updates.
+        with self._connector_lock:
+            return connect_connector(
+                self.secrets, name, fields, acknowledged=acknowledged
+            )
 
     def set_experimental_connectors(self, value: bool) -> dict[str, Any]:
         return set_experimental_enabled(self.secrets, value)
+
+    def wechat_official_settings(self) -> dict[str, bool]:
+        with self._connector_lock:
+            profile = self._wechat_official_profile()
+            need_open_comment = (
+                profile.get("need_open_comment")
+                if type(profile.get("need_open_comment")) is bool
+                else False
+            )
+            only_fans_can_comment = (
+                profile.get("only_fans_can_comment")
+                if need_open_comment
+                and type(profile.get("only_fans_can_comment")) is bool
+                else False
+            )
+            return {
+                "need_open_comment": need_open_comment,
+                "only_fans_can_comment": only_fans_can_comment,
+            }
+
+    def update_wechat_official_settings(
+        self, changes: Any
+    ) -> dict[str, bool]:
+        if not isinstance(changes, dict):
+            raise ValueError("设置必须是 JSON 对象")
+        unknown = set(changes) - _WECHAT_OFFICIAL_SETTINGS
+        if unknown:
+            raise ValueError("只支持公众号评论设置")
+        if any(type(value) is not bool for value in changes.values()):
+            raise ValueError("公众号评论设置必须是布尔值")
+
+        with self._connector_lock:
+            profile = self._wechat_official_profile()
+            need_open_comment = (
+                profile.get("need_open_comment")
+                if type(profile.get("need_open_comment")) is bool
+                else False
+            )
+            only_fans_can_comment = (
+                profile.get("only_fans_can_comment")
+                if type(profile.get("only_fans_can_comment")) is bool
+                else False
+            )
+            need_open_comment = changes.get(
+                "need_open_comment", need_open_comment
+            )
+            only_fans_can_comment = changes.get(
+                "only_fans_can_comment", only_fans_can_comment
+            )
+            if not need_open_comment:
+                only_fans_can_comment = False
+            profile["need_open_comment"] = need_open_comment
+            profile["only_fans_can_comment"] = only_fans_can_comment
+            self.secrets.put("wechat_official:default", profile)
+            return {
+                "need_open_comment": need_open_comment,
+                "only_fans_can_comment": only_fans_can_comment,
+            }
+
+    def _wechat_official_profile(self) -> dict[str, Any]:
+        profile = self.secrets.get("wechat_official:default")
+        if not isinstance(profile, dict) or not all(
+            isinstance(profile.get(key), str) and bool(profile[key].strip())
+            for key in ("app_id", "app_secret")
+        ):
+            raise LookupError(_WECHAT_OFFICIAL_DISCONNECTED)
+        return profile
+
 
     def disconnect_connector(self, name: str) -> dict[str, Any]:
         # MCP-backed profile: drop the live server connection before the tokens go.
         conn = self.mcp._conns.get(name)
         if conn is not None:
             conn.shutdown.set()
-        return disconnect_connector(self.secrets, name)
+        with self._connector_lock:
+            return disconnect_connector(self.secrets, name)
 
     def update_connector_tools(
         self, name: str, enabled: dict[str, Any]
@@ -1386,6 +1564,24 @@ class SessionManager:
         self.secrets.put("web_search:default", profile)
         return {"ok": True, "provider": provider}
 
+    def get_image_generation_status(self) -> dict[str, Any]:
+        """Return the effective non-secret image configuration for readiness UI."""
+        try:
+            provider = build_image_provider(self.secrets)
+        except (ImageAuthError, ValueError):
+            profile = self.secrets.get("provider:openai") or {}
+            try:
+                model = normalize_openai_image_model(profile.get("image_model"))
+            except (AttributeError, ValueError):
+                model = DEFAULT_OPENAI_IMAGE_MODEL
+            return {"configured": False, "provider": "openai", "model": model}
+        return {
+            "configured": True,
+            "provider": "openai",
+            "model": provider.model,
+        }
+
+
     # -- model providers (OpenAI, Ollama, …) ------------------------------------
     def get_providers(self) -> list[dict[str, Any]]:
         """Descriptor + per-provider status for the Settings UI. Never returns secret values;
@@ -1396,6 +1592,14 @@ class SessionManager:
         out: list[dict[str, Any]] = []
         for d in provider_descriptors():
             profile = self.secrets.get(f"provider:{d.name}") or {}
+            image_model: Optional[str] = None
+            if d.name == "openai":
+                try:
+                    image_model = normalize_openai_image_model(
+                        profile.get("image_model")
+                    )
+                except ValueError:
+                    image_model = DEFAULT_OPENAI_IMAGE_MODEL
             if d.needs_key:
                 configured = bool(profile.get("api_key")) or bool(
                     d.env_key and os.environ.get(d.env_key)
@@ -1412,6 +1616,11 @@ class SessionManager:
                     **d.to_dict(),
                     "configured": configured,
                     "values": values,
+                    **(
+                        {"image_model": image_model}
+                        if d.name == "openai"
+                        else {}
+                    ),
                     "suggested_models": self._suggested_models(d.name),
                     # Key hygiene for the Settings pane: when the key was saved (date, stamped
                     # by set_provider) and when the provider last served a completion (epoch,
@@ -1514,6 +1723,16 @@ class SessionManager:
         if d is None:
             return {"ok": False, "error": f"unknown provider: {name}"}
         fields = fields or {}
+        if name == "openai" and "image_model" in fields:
+            try:
+                fields = {
+                    **fields,
+                    "image_model": normalize_openai_image_model(
+                        fields.get("image_model")
+                    ),
+                }
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
         profile = dict(self.secrets.get(f"provider:{name}") or {})
         for f in d.fields:
             if f.key not in fields:
@@ -1525,7 +1744,18 @@ class SessionManager:
                 profile[f.key] = val
             elif not f.required:
                 profile.pop(f.key, None)
-        missing = [f.label for f in d.fields if f.required and not profile.get(f.key)]
+        missing = [
+            f.label
+            for f in d.fields
+            if f.required
+            and not profile.get(f.key)
+            and not (
+                f.secret
+                and d.env_key
+                and isinstance(os.environ.get(d.env_key), str)
+                and os.environ[d.env_key].strip()
+            )
+        ]
         if missing:
             return {"ok": False, "error": "missing: " + ", ".join(missing)}
         # A (re)pasted key stamps its save date — Settings shows "key added <date>" so stale
@@ -1771,8 +2001,7 @@ class SessionManager:
             "surfaces": self._surfaces(),
             "nav_layout": self._nav_layout(),
             "sessions_peek": self.sessions_peek(),
-            "scratch_base": self._prefs.get("scratch_base")
-            or self.DEFAULT_SCRATCH_BASE,
+            "scratch_base": self._scratch_base_setting(),
             # Real on-disk secrets location, so the UI shows the OS-native path instead of a
             # hardcoded POSIX one (Windows -> %APPDATA%\coworker, macOS/Linux -> ~/.config).
             "secrets_path": str(self.secrets.path),
@@ -1911,8 +2140,9 @@ class SessionManager:
 
     def set_scratch_base(self, path: str) -> dict[str, Any]:
         """Set + persist the common area where each Cowork conversation's scratch directory is
-        created (default ~/OpenWorker). The raw value is stored so the UI shows it as entered;
-        new conversations use it immediately (existing ones keep their provisioned dir).
+        created (default ~/WenShu; existing ~/OpenWorker installs remain there). The raw value
+        is stored so the UI shows it as entered; new conversations use it immediately
+        (existing ones keep their provisioned dir).
         """
         path = (path or "").strip()
         if not path:
@@ -2126,14 +2356,15 @@ class SessionManager:
         profile_key = f"slack:team:{team_id}"
         if not team_id or not self.secrets.get(profile_key):
             return {"ok": False, "error": "workspace not connected"}
-        from .. import cloud
-        from ..config import load_config
+        if self.product.features.get("relay", False):
+            from .. import cloud
+            from ..config import load_config
 
-        await asyncio.to_thread(
-            lambda: cloud.slack_disconnect_workspace(
-                self.secrets, load_config(), team_id
+            await asyncio.to_thread(
+                lambda: cloud.slack_disconnect_workspace(
+                    self.secrets, load_config(), team_id
+                )
             )
-        )
         self.secrets.delete(profile_key)
         remaining = [
             m["profile"]
@@ -2204,19 +2435,21 @@ class SessionManager:
         (best-effort), drop the local profile, hot-reload the gateway. The Slack
         per-workspace disconnect, GitHub flavour — a manual PAT stays untouched."""
         installation_id = str(installation_id).strip()
-        from .. import cloud
-        from ..config import load_config
         from ..connectors import github_installs
 
         if not installation_id or not self.secrets.get(
             github_installs.PREFIX + installation_id
         ):
             return {"ok": False, "error": "installation not connected"}
-        await asyncio.to_thread(
-            lambda: cloud.github_disconnect_installation(
-                self.secrets, load_config(), installation_id
+        if self.product.features.get("relay", False):
+            from .. import cloud
+            from ..config import load_config
+
+            await asyncio.to_thread(
+                lambda: cloud.github_disconnect_installation(
+                    self.secrets, load_config(), installation_id
+                )
             )
-        )
         result = github_installs.disconnect_install(self.secrets, installation_id)
         await self.refresh_gateway()
         return result
@@ -2271,7 +2504,9 @@ class SessionManager:
         return started
 
     async def _build_and_start_gateway(self) -> list[str]:
-        settings = load_settings(self.secrets)
+        settings = load_settings(
+            self.secrets, platforms=self.product.visible_connectors
+        )
         self.gateway = Gateway(
             secrets=self.secrets,
             settings=settings,
@@ -2280,45 +2515,53 @@ class SessionManager:
             interaction_handler=self._on_interaction,
             on_unauthorized=self._park_unauthorized,
         )
-        # Managed Slack relay wiring (only used when a connector picks relay mode):
-        # the cloud sign-in JWT authorizes the relay WebSocket, and the relay
-        # endpoint comes from config. Both are lazy — Socket Mode needs neither.
-        from ..cloud import fresh_access_token
-        from ..config import load_config
-
-        cloud_config = load_config()
-
-        def _relay_token() -> str:
-            return fresh_access_token(self.secrets, cloud_config) or ""
-
-        # Every relay-mode platform shares ONE cloud socket; the hub fans frames
-        # out by provider tag. Built lazily on the first relay adapter.
-        relay_ws_url = getattr(cloud_config, "cloud_relay_ws_url", "") or None
+        relay_enabled = self.product.features.get("relay", False)
+        relay_ws_url = None
         relay_hub = None
-        if relay_ws_url:
+        relay_token_provider = None
+        github_token_client = None
+        if relay_enabled:
+            # Managed platforms share one cloud socket. Everything stays lazy:
+            # manual adapters neither import cloud helpers nor create a RelayHub.
+            from ..cloud import fresh_access_token, github_installation_token
+            from ..config import load_config
             from ..connectors.relay_client import RelayHub
 
-            relay_hub = RelayHub(relay_ws_url, _relay_token)
+            cloud_config = load_config()
 
-        async def _github_token(installation_id: str) -> str:
-            from ..cloud import github_installation_token
+            def _relay_token() -> str:
+                return fresh_access_token(self.secrets, cloud_config) or ""
 
-            return await asyncio.to_thread(
-                github_installation_token, self.secrets, cloud_config, installation_id
-            )
+            async def _github_token(installation_id: str) -> str:
+                return await asyncio.to_thread(
+                    github_installation_token,
+                    self.secrets,
+                    cloud_config,
+                    installation_id,
+                )
+
+            relay_ws_url = getattr(cloud_config, "cloud_relay_ws_url", "") or None
+            if relay_ws_url:
+                relay_hub = RelayHub(relay_ws_url, _relay_token)
+            relay_token_provider = _relay_token
+            github_token_client = _github_token
 
         for platform, st in settings.items():
             if not st.enabled:
                 continue
             profile = self.secrets.get(f"{platform}:default") or {}
+            if not relay_enabled and (
+                profile.get("mode") == "relay" or profile.get("managed")
+            ):
+                continue
             adapter = make_adapter(
                 platform,
                 profile,
                 secrets=self.secrets,
-                token_provider=_relay_token,
+                token_provider=relay_token_provider,
                 relay_url=relay_ws_url,
                 relay_hub=relay_hub,
-                github_token_client=_github_token,
+                github_token_client=github_token_client,
             )
             if adapter is not None:
                 self.gateway.register(adapter)
@@ -2442,18 +2685,20 @@ class SessionManager:
 
     # -- automation (scheduled tasks) -------------------------------------------
     def approval_prompt_data(self, session_id: str, request) -> dict[str, Any]:
-        """Extra Inbox-item payload for a parked approval. Always carries the tool name +
-        arguments so the GUI can render the same humanized card (§35) it shows live —
-        without them a reopened session fell back to the raw 'Run `tool`?' treatment.
-        Automation runs additionally carry the owning task + (when the call is eligible)
-        the exact target a standing rule would pin: the GUI offers "Allow every time" only
-        when both are present — in-app only, never on Slack-mirrored buttons (§25)."""
+        """Extra Inbox-item payload for a parked approval.
+
+        The card receives display arguments when the host supplied them, while standing-rule
+        eligibility below always evaluates the original tool arguments. Automation runs also
+        carry their owning task and eligible standing target.
+        """
         from ..permissions import standing_rule_candidate
 
         data: dict[str, Any] = {
             "tool": request.tool_name,
-            "arguments": getattr(request, "arguments", None) or {},
+            "arguments": _presented_arguments(request),
         }
+        if bool(getattr(request, "approval_once_only", False)):
+            data["approval_once_only"] = True
         task = self.task_store.task_for_run_session(session_id)
         if task is None:
             return data
@@ -2578,6 +2823,7 @@ class SessionManager:
             provider=self.provider,
             memory_store=self.memory_store,
             secrets=self.secrets,
+            product=self.product,
             # No scheduling tools inside a scheduled run: the executing agent's job is to DO the
             # task, and instructions that mention timing ("every day at 5:32pm…") otherwise tempt
             # it to create another automation instead of running this one.
@@ -2789,6 +3035,8 @@ class SessionManager:
         DM session (delivered like any background turn) or, if none is set, is parked as unrouted.
         """
         src = event.source
+        if src.platform not in self.product.visible_connectors:
+            return
         text = getattr(event, "text", "") or ""
         who = src.user_name or src.user_id or "?"
         channel = f"{src.platform}:{src.chat_id}"  # thread-agnostic channel address

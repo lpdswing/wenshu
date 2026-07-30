@@ -37,10 +37,20 @@ const openWebSocket = (url: string): WebSocket => {
     : new WebSocket(url);
 };
 
+export interface ProductInfo {
+  id: string;
+  name: string;
+  display_name: string;
+  default_persona: string;
+  visible_connectors: string[];
+  features: Record<string, boolean>;
+}
+
 export interface Health {
   status: string;
   default_workspace: string | null;
   model: string;
+  product: ProductInfo;
 }
 
 export interface RecentWorkspace {
@@ -438,6 +448,10 @@ export interface Connector {
   instructions: string[];
   connected: boolean;
   account: string | null;
+  // Credential values are never returned; list/status expose only the stable
+  // display identity and the names of fields configured in the local secret store.
+  identity?: string | null;
+  configured_fields?: string[];
   enabled: boolean;
   brand_color: string; // hex brand color, e.g. "#611f69" (fallback gray "#6b7280")
   logo: string; // stable logo id keyed into the frontend registry (empty → fallback glyph)
@@ -577,13 +591,53 @@ export async function getConnectors(): Promise<Connector[]> {
 export async function connectConnector(
   name: string,
   fields: Record<string, string>,
-): Promise<{ ok: boolean; account?: string; error?: string }> {
+): Promise<{ ok: boolean; identity?: string; account?: string; error?: string }> {
   const res = await fetch(`${httpBase()}/v1/connectors/${encodeURIComponent(name)}/connect`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ fields }),
   });
   return res.json();
+}
+
+export interface WechatSettings {
+  need_open_comment: boolean;
+  only_fans_can_comment: boolean;
+}
+
+function parseWechatSettings(value: unknown): WechatSettings {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    !("need_open_comment" in value) ||
+    typeof value.need_open_comment !== "boolean" ||
+    !("only_fans_can_comment" in value) ||
+    typeof value.only_fans_can_comment !== "boolean"
+  )
+    throw new Error("invalid wechat settings response");
+  return {
+    need_open_comment: value.need_open_comment,
+    only_fans_can_comment: value.only_fans_can_comment,
+  };
+}
+
+export async function getWechatSettings(): Promise<WechatSettings> {
+  const res = await fetch(`${httpBase()}/v1/connectors/wechat_official/settings`);
+  if (!res.ok) throw new Error(`wechat settings request failed: ${res.status}`);
+  return parseWechatSettings(await res.json());
+}
+
+export async function patchWechatSettings(settings: WechatSettings): Promise<WechatSettings> {
+  const res = await fetch(`${httpBase()}/v1/connectors/wechat_official/settings`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      need_open_comment: settings.need_open_comment,
+      only_fans_can_comment: settings.only_fans_can_comment,
+    }),
+  });
+  if (!res.ok) throw new Error(`wechat settings update failed: ${res.status}`);
+  return parseWechatSettings(await res.json());
 }
 
 export async function disconnectConnector(name: string): Promise<{ ok: boolean }> {
@@ -1265,7 +1319,21 @@ export interface ProviderField {
   help: string;
   placeholder: string;
   default?: string; // pre-filled editable value (e.g. an OpenAI-compatible vendor's endpoint)
+  options?: string[]; // suggested values; the text field still accepts a custom id
 }
+export interface ImageGenerationStatus {
+  configured: boolean;
+  provider: string;
+  model: string;
+}
+
+export async function getImageGenerationStatus(): Promise<ImageGenerationStatus> {
+  const res = await fetch(`${httpBase()}/v1/image-generation/status`);
+  if (!res.ok) throw new Error(`image generation status failed: ${res.status}`);
+  return res.json();
+}
+
+
 
 export interface ProviderInfo {
   name: string;
@@ -1277,6 +1345,7 @@ export interface ProviderInfo {
   suggested_models: string[]; // bare model-name suggestions for the "add model" datalist
   recommended_model: string | null; // pre-filled default for this provider (e.g. qwen3-coder:30b)
   blurb?: string; // one-line note under the title ("Uses X's OpenAI-compatible API…")
+  image_model?: string; // effective image model; independent of the chat model
   key_set_at?: string | null; // ISO date the key was last (re)saved — absent for env-only config
   last_used_at?: number | null; // epoch secs the provider last served a completion
 }

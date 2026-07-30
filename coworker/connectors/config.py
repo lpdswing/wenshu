@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Iterable, Optional
 
 from ..secrets import SecretStore
 from .base import SessionSource
@@ -64,16 +64,24 @@ def _csv(value: Optional[str]) -> set[str]:
 
 def load_settings(
     secrets: Optional[SecretStore] = None,
+    *,
+    platforms: Optional[Iterable[str]] = None,
 ) -> dict[str, ConnectorSettings]:
     """Per-platform settings from the SecretStore profile + env overrides.
 
     A platform is enabled when its token profile exists (and isn't explicitly disabled).
     Allowlist/allow-all come from the profile or `<PLATFORM>_ALLOWED_USERS` /
     `<PLATFORM>_ALLOW_ALL_USERS` env vars (env wins).
+
+    When ``platforms`` is provided, excluded profiles are never read. This keeps product
+    allow-listing ahead of credential access and adapter construction.
     """
     secrets = secrets or SecretStore()
+    allowed_platforms = frozenset(platforms) if platforms is not None else None
     out: dict[str, ConnectorSettings] = {}
     for platform in PLATFORMS:
+        if allowed_platforms is not None and platform not in allowed_platforms:
+            continue
         profile = secrets.get(f"{platform}:default") or {}
         token = profile.get("bot_token")
         allowed = set(profile.get("allowed_users") or [])

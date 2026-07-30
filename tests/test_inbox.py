@@ -127,3 +127,45 @@ def test_approval_body_includes_tool_args():
 
     req2 = PermissionRequest("rm", {"path": "/x"}, None, "destructive")
     assert _approval_body(req2).startswith("destructive")  # reason leads when present
+
+
+def test_parked_approval_payload_uses_display_arguments_only_for_presentation():
+    from coworker.engine import PermissionRequest
+    from coworker.server.manager import SessionManager, _approval_body
+
+    arguments = {"article_path": "article.md", "reviewed_hash": "a" * 64}
+    display_arguments = {
+        **arguments,
+        "article_title": "审批中的文章",
+        "provider": "OpenAI",
+        "model": "gpt-image-2",
+        "total_images": 3,
+    }
+    request = PermissionRequest(
+        tool_name="generate_article_assets",
+        arguments=arguments,
+        metadata=None,
+        reason="paid operation",
+        display_arguments=display_arguments,
+        approval_once_only=True,
+    )
+
+    class NoTasks:
+        @staticmethod
+        def task_for_run_session(_session_id):
+            return None
+
+    class PromptManager:
+        task_store = NoTasks()
+
+    data = SessionManager.approval_prompt_data(PromptManager(), "session-1", request)
+
+    assert data == {
+        "tool": "generate_article_assets",
+        "arguments": display_arguments,
+        "approval_once_only": True,
+    }
+    assert request.arguments == arguments
+    body = _approval_body(request)
+    assert "审批中的文章" in body
+    assert "OpenAI" in body

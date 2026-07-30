@@ -39,8 +39,12 @@ def _connect_slack(mgr):
     )
 
 
-def test_dm_with_designated_session_delivers(tmp_path, monkeypatch):
-    mgr = SessionManager(workspace=tmp_path, provider=ScriptedProvider())
+def test_dm_with_designated_session_delivers(
+    tmp_path, monkeypatch, permissive_product
+):
+    mgr = SessionManager(
+        workspace=tmp_path, provider=ScriptedProvider(), product=permissive_product
+    )
     _connect_slack(mgr)
     delivered: list[tuple[str, str]] = []
 
@@ -58,8 +62,10 @@ def test_dm_with_designated_session_delivers(tmp_path, monkeypatch):
     assert mgr.unrouted.list() == []
 
 
-def test_dm_without_designation_is_parked(tmp_path):
-    mgr = SessionManager(workspace=tmp_path, provider=ScriptedProvider())
+def test_dm_without_designation_is_parked(tmp_path, permissive_product):
+    mgr = SessionManager(
+        workspace=tmp_path, provider=ScriptedProvider(), product=permissive_product
+    )
     assert mgr.dm_session() is None
 
     asyncio.run(mgr._dispatch_inbound(_dm("hello there")))

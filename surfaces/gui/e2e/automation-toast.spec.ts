@@ -21,13 +21,13 @@ test("a schedule-fired run pops the toast; View run opens its session", async ({
   await page.goto("/");
   await sendAppEvent(page, RUN_STARTED);
   const toast = page.getByTestId("automation-toast");
-  await expect(toast).toContainText("Automation started");
+  await expect(toast).toContainText("自动化已启动");
   await expect(toast).toContainText("Daily AI News");
 
   await toast.getByTestId("toast-view-run").click();
   await expect(page.getByTestId("automation-toast")).toHaveCount(0);
   // the run's session is now the active conversation (composer visible = session surface)
-  await expect(page.getByPlaceholder(/Ask the coworker/)).toBeVisible();
+  await expect(page.getByPlaceholder("告诉文枢你想完成什么...")).toBeVisible();
 });
 
 test("the toast dismisses on ✕ and by itself after ~5s", async ({ page }) => {

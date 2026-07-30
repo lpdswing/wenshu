@@ -8,6 +8,7 @@ The vendor's catalog can drift under us — every gate here fails CLOSED."""
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from types import SimpleNamespace
 
 from coworker.connectors.setup import (
@@ -17,6 +18,7 @@ from coworker.connectors.setup import (
 )
 from coworker.connectors.descriptors import list_descriptors
 from coworker.connectors.tool_defs import mcp_pinned_tools, mcp_tool_defs, tool_dicts
+from coworker.product import current_product
 from coworker.mcp.config import put_global_server, read_global
 from coworker.secrets import SecretStore
 from coworker.server.manager import SessionManager
@@ -69,9 +71,13 @@ def test_tool_dicts_follow_the_profile_mode(tmp_path, monkeypatch):
     assert names and all(n.startswith("mcp__asana__") for n in names)
 
 
-def test_mcp_connect_seeds_pinned_config_and_profile(tmp_path, monkeypatch):
+def test_mcp_connect_seeds_pinned_config_and_profile(
+    tmp_path, monkeypatch, permissive_product
+):
     _state(tmp_path, monkeypatch)
-    manager = SessionManager(data_dir=tmp_path / "data")
+    manager = SessionManager(
+        data_dir=tmp_path / "data", product=permissive_product
+    )
 
     async def fake_connect(name):
         return {"ok": True, "tools": 9}
@@ -93,12 +99,16 @@ def test_mcp_connect_seeds_pinned_config_and_profile(tmp_path, monkeypatch):
     assert not out["ok"]
 
 
-def test_failed_mcp_connect_removes_the_seeded_config(tmp_path, monkeypatch):
+def test_failed_mcp_connect_removes_the_seeded_config(
+    tmp_path, monkeypatch, permissive_product
+):
     """A one-click that fails (DCR rejected, user closed the browser) must not leave
     an enabled oauth server behind — the leftover re-arms at every session start
     (owner-hit: the pulled asana attempt froze all new sessions, 2026-07-20)."""
     _state(tmp_path, monkeypatch)
-    manager = SessionManager(data_dir=tmp_path / "data")
+    manager = SessionManager(
+        data_dir=tmp_path / "data", product=permissive_product
+    )
 
     async def fail_connect(name):
         return {"ok": False, "error": "no DCR"}
@@ -109,6 +119,28 @@ def test_failed_mcp_connect_removes_the_seeded_config(tmp_path, monkeypatch):
     assert "monday" not in read_global()
     assert manager.secrets.get("monday:default") is None
 
+
+
+def test_wenshu_rejects_mcp_connector_before_oauth(tmp_path, monkeypatch):
+    _state(tmp_path, monkeypatch)
+    manager = SessionManager(data_dir=tmp_path / "data")
+    calls = []
+
+    async def must_not_connect(name):
+        calls.append(name)
+        raise AssertionError("hidden connector reached OAuth")
+
+    monkeypatch.setattr(manager, "connect_mcp", must_not_connect)
+
+    out = asyncio.run(manager.mcp_connect_connector("monday"))
+
+    assert out == {
+        "ok": False,
+        "error": "connector not available in this product: monday",
+    }
+    assert calls == []
+    assert "monday" not in read_global()
+    assert manager.secrets.get("monday:default") is None
 
 def test_prepare_mcp_tools_never_starts_an_oauth_flow(tmp_path, monkeypatch):
     """Token-less oauth servers are SKIPPED at turn start — connecting one would
@@ -179,12 +211,85 @@ def _fake_tool(name):
     )
 
 
+def test_product_profile_gates_connector_mcp_tools(tmp_path, monkeypatch):
+    _state(tmp_path, monkeypatch)
+    put_global_server(
+        "monday",
+        {
+            "url": "https://mcp.monday.com/mcp",
+            "auth": "oauth",
+            "enabled": True,
+        },
+    )
+
+    def configured_manager(name, product=None):
+        manager = SessionManager(data_dir=tmp_path / name, product=product)
+        manager.secrets.put(
+            "monday:default", {"mode": "mcp", "enabled": True}
+        )
+        manager.secrets.put(
+            "mcp-oauth:monday", {"tokens": {"access_token": "at"}}
+        )
+
+        async def fake_ensure(_server):
+            return SimpleNamespace(tools=[_fake_tool("get_board_info")])
+
+        monkeypatch.setattr(manager.mcp, "ensure", fake_ensure)
+        monkeypatch.setattr(
+            manager, "effective_connectors", lambda sid, agent=None: {"monday"}
+        )
+        return manager
+
+    def ordinary_extra():
+        return "ordinary"
+
+    def standalone_mcp_extra():
+        return "standalone"
+
+    standalone_mcp_extra.__name__ = "mcp__filesystem__read"
+
+    def injected_hidden():
+        return "hidden"
+
+    injected_hidden.__name__ = "mcp__monday__injected"
+
+    default_manager = configured_manager("default")
+    prepared = asyncio.run(default_manager.prepare_mcp_tools("hidden", agent="cowork"))
+    assert prepared == []
+    default_engine = default_manager.get_engine(
+        "hidden",
+        agent="cowork",
+        extra_tools=[ordinary_extra, standalone_mcp_extra, injected_hidden],
+    )
+    assert "ordinary_extra" in default_engine.registry.names()
+    assert "mcp__filesystem__read" in default_engine.registry.names()
+    assert "mcp__monday__injected" not in default_engine.registry.names()
+
+    monday_product = replace(
+        current_product(),
+        visible_connectors=current_product().visible_connectors | {"monday"},
+    )
+    allowed_manager = configured_manager("allowed", product=monday_product)
+    prepared = asyncio.run(allowed_manager.prepare_mcp_tools("allowed", agent="cowork"))
+    allowed_engine = allowed_manager.get_engine(
+        "allowed",
+        agent="cowork",
+        extra_tools=[ordinary_extra, *prepared],
+    )
+    assert "ordinary_extra" in allowed_engine.registry.names()
+    assert "mcp__monday__get_board_info" in allowed_engine.registry.names()
+
+
 def test_prepare_mcp_tools_gates_by_session_pin_and_toggles(tmp_path, monkeypatch):
     """The engine path: descriptor pin overrides stale config, per-tool toggles
     subtract, session gating skips connectors outside the effective set, and
     approval follows the read/write classification."""
     _state(tmp_path, monkeypatch)
-    manager = SessionManager(data_dir=tmp_path / "data")
+    product = replace(
+        current_product(),
+        visible_connectors=current_product().visible_connectors | {"monday"},
+    )
+    manager = SessionManager(data_dir=tmp_path / "data", product=product)
     manager.secrets.put("monday:default", {"mode": "mcp", "enabled": True})
     # Tokens present — a token-less oauth server is skipped outright (see
     # test_prepare_mcp_tools_never_starts_an_oauth_flow).

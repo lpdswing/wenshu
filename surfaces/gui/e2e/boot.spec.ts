@@ -1,11 +1,52 @@
-// Cold-boot fixes (owner-hit 2026-07-23): the splash wears the real OpenWorker mark
+// Cold-boot fixes (owner-hit 2026-07-23): the splash wears the real 文枢 mark
 // (6-point star SVG, not the ✦ text glyph that read as another product's logo), and the
 // model picker recovers when the mount-time settings fetch loses the race against the
 // sidecar boot — previously "Loading models…" stuck until the user visited Settings.
-import { expect } from "@playwright/test";
-import { test } from "./fixtures";
+import { expect, test as base } from "@playwright/test";
+import { mockApi, WENSHU_PRODUCT, wenshuTest as test } from "./fixtures";
 
-test("boot splash shows the OpenWorker star, not the sparkle glyph", async ({ page }) => {
+const customDefaultPersonaTest = base.extend({
+  page: async ({ page }, use) => {
+    await mockApi(page, {
+      ...WENSHU_PRODUCT,
+      id: "custom-default-persona",
+      default_persona: "ops",
+    });
+    await page.route("**/v1/sessions", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/v1/sessions") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ sessions: [] }),
+        });
+        return;
+      }
+      await route.fallback();
+    });
+    await use(page);
+  },
+});
+
+
+customDefaultPersonaTest("uses ProductProfile.default_persona for a fresh session", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  const recent = page.getByTestId("recent-header").locator("..");
+  const opsGroup = recent.getByText("Ops", { exact: true }).locator("xpath=../..");
+  const wenshuGroup = recent.getByText("文枢", { exact: true }).locator("xpath=../..");
+  await expect(opsGroup).toContainText("暂无会话。");
+  await expect(wenshuGroup).not.toContainText("暂无会话。");
+});
+
+test("uses the Wenshu product title", async ({ page }) => {
+  await page.goto("/");
+  await expect(page).toHaveTitle("文枢 WenShu");
+});
+
+test("boot splash shows the Wenshu star, not the sparkle glyph", async ({ page }) => {
   // Hold health long enough to observe the splash.
   await page.route("**/v1/health", async (route) => {
     await new Promise((r) => setTimeout(r, 1500));
@@ -16,7 +57,7 @@ test("boot splash shows the OpenWorker star, not the sparkle glyph", async ({ pa
   await expect(mark).toBeVisible();
   await expect(mark.locator("svg")).toBeVisible(); // the Icon logo, not a text glyph
   await expect(mark).not.toContainText("✦");
-  await expect(page.getByText(/Starting OpenWorker|Restoring your session/)).toBeVisible();
+  await expect(page.getByText(/正在启动文枢|正在恢复会话/)).toBeVisible();
 });
 
 test("model picker recovers when settings fetches die during sidecar boot", async ({ page }) => {

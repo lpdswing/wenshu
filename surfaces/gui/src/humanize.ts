@@ -1,4 +1,4 @@
-// UX-015 (§33): tool calls render as English one-liners. The model does NOT emit a purpose
+// UX-015 (§33): tool calls render as concise one-liners. The model does NOT emit a purpose
 // per call — the stream is name+args+result — so the sentence is synthesized here from
 // per-tool templates. `run_shell` is the exception: its optional `description` argument is
 // model-written intent and is preferred when present. Fallback: "Used <tool> — <short args>".
@@ -14,7 +14,20 @@ export interface HumanLine {
 }
 
 const trunc = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
-const baseName = (p: string) => p.replace(/\/+$/, "").split("/").pop() || p;
+const baseName = (p: string) => p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || p;
+const articleLabel = (args: Record<string, unknown>): string => {
+  const titleValue = args.article_title ?? args.title;
+  const title = typeof titleValue === "string" ? titleValue.trim() : "";
+  if (title) return title;
+  const path = typeof args.article_path === "string" ? args.article_path.trim() : "";
+  return path ? baseName(path) || "文章" : "文章";
+};
+const TODO_STATUS_LABELS: Record<string, string> = {
+  pending: "待处理",
+  in_progress: "进行中",
+  completed: "已完成",
+  done: "已完成",
+};
 
 // send_message targets are "platform:chat" or "platform:chat:thread" — show the platform
 // by name and the last human-ish segment of the chat id.
@@ -32,25 +45,25 @@ export function humanizeTool(name: string, args: any): HumanLine {
     case "run_shell": {
       const cmd = trunc(String(a.command ?? ""), 60);
       const desc = typeof a.description === "string" && a.description.trim() ? a.description.trim() : "";
-      const pre = a.run_in_background ? "Started in the background: " : "Ran ";
+      const pre = a.run_in_background ? "已在后台启动：" : "已运行 ";
       return {
         pre,
         obj: cmd,
-        ...(desc ? { post: ` — ${desc.charAt(0).toLowerCase()}${desc.slice(1)}` } : {}),
+        ...(desc ? { post: ` — ${desc}` } : {}),
       };
     }
     case "shell_task_output":
-      return { pre: "Checked on a background command" };
+      return { pre: "已检查后台命令" };
     case "shell_task_kill":
-      return { pre: "Stopped a background command" };
+      return { pre: "已停止后台命令" };
     case "read_file":
-      return { pre: "Read ", obj: baseName(String(a.path ?? "a file")) };
+      return { pre: "已读取 ", obj: baseName(String(a.path ?? "文件")) };
     case "write_file":
-      return { pre: "Wrote ", obj: baseName(String(a.path ?? "a file")) };
+      return { pre: "已写入 ", obj: baseName(String(a.path ?? "文件")) };
     case "replace_in_file":
     case "apply_patch":
     case "apply_unified_diff":
-      return { pre: "Edited ", obj: a.path ? baseName(String(a.path)) : "files" };
+      return { pre: "已编辑 ", obj: a.path ? baseName(String(a.path)) : "文件" };
     case "grep":
       return { pre: "Searched the code for ", obj: `“${trunc(String(a.pattern ?? ""), 40)}”` };
     case "git_log":
@@ -61,14 +74,15 @@ export function humanizeTool(name: string, args: any): HumanLine {
       const items = Array.isArray(a.todos) ? a.todos : Array.isArray(a.items) ? a.items : [];
       if (items.length === 1) {
         const it = items[0] || {};
-        const status = String(it.status || "").replace(/_/g, " ");
+        const rawStatus = String(it.status || "");
+        const status = TODO_STATUS_LABELS[rawStatus] || rawStatus.replace(/_/g, " ");
         return {
-          pre: "Updated the plan — ",
+          pre: "已更新计划 — ",
           obj: `“${trunc(String(it.content ?? ""), 70)}”`,
           ...(status ? { post: ` → ${status}` } : {}),
         };
       }
-      return { pre: `Updated the plan — ${items.length} items` };
+      return { pre: `已更新计划 — ${items.length} 项` };
     }
     case "send_message": {
       const { platform, tail } = messageTarget(String(a.target ?? ""));
@@ -94,6 +108,14 @@ export function humanizeTool(name: string, args: any): HumanLine {
       return { pre: "Proposed a plan" };
     case "request_directory":
       return { pre: "Asked for folder access — ", obj: String(a.path ?? "") };
+    case "prepare_article_review":
+      return { pre: "生成了文章文字预览：", obj: articleLabel(a) };
+    case "generate_article_assets":
+      return { pre: "为文章生成封面与配图：", obj: articleLabel(a) };
+    case "prepare_wechat_draft":
+      return { pre: "生成了公众号最终图文预览：", obj: articleLabel(a) };
+    case "create_wechat_draft":
+      return { pre: "保存到公众号草稿箱：", obj: articleLabel(a) };
     default: {
       const rest = trunc(shortArgs(a), 80);
       return { pre: `Used ${name}`, ...(rest ? { post: ` — ${rest}` } : {}) };
@@ -107,32 +129,40 @@ export function humanizeApprovalTitle(name: string, args: any): HumanLine {
   const a = args && typeof args === "object" ? args : {};
   switch (name) {
     case "write_file":
-      return { pre: "Write ", obj: baseName(String(a.path ?? "a file")) };
+      return { pre: "写入 ", obj: baseName(String(a.path ?? "文件")) };
     case "replace_in_file":
     case "apply_patch":
     case "apply_unified_diff":
-      return { pre: "Edit ", obj: a.path ? baseName(String(a.path)) : "files" };
+      return { pre: "编辑 ", obj: a.path ? baseName(String(a.path)) : "文件" };
     case "run_shell": {
       const desc = typeof a.description === "string" && a.description.trim() ? a.description.trim() : "";
       return {
-        pre: "Run a command",
-        ...(desc ? { post: ` — ${desc.charAt(0).toLowerCase()}${desc.slice(1)}` } : {}),
+        pre: "运行命令",
+        ...(desc ? { post: ` — ${desc}` } : {}),
       };
     }
     case "send_message": {
       const { tail } = messageTarget(String(a.target ?? ""));
-      return tail ? { pre: "Send a message to ", obj: tail } : { pre: "Send a message" };
+      return tail ? { pre: "发送消息至 ", obj: tail } : { pre: "发送消息" };
     }
     case "send_file": {
       const { tail } = messageTarget(String(a.target ?? ""));
-      return tail ? { pre: "Send a file to ", obj: tail } : { pre: "Send a file" };
+      return tail ? { pre: "发送文件至 ", obj: tail } : { pre: "发送文件" };
     }
+    case "prepare_article_review":
+      return { pre: "生成文章文字预览：", obj: articleLabel(a) };
+    case "generate_article_assets":
+      return { pre: "为文章生成封面与配图：", obj: articleLabel(a) };
+    case "prepare_wechat_draft":
+      return { pre: "生成公众号最终图文预览：", obj: articleLabel(a) };
+    case "create_wechat_draft":
+      return { pre: "保存到公众号草稿箱：", obj: articleLabel(a) };
     case "create_scheduled_task":
       return a.title
-        ? { pre: "Create the automation ", obj: `“${trunc(String(a.title), 60)}”` }
-        : { pre: "Create an automation" };
+        ? { pre: "创建自动化 ", obj: `“${trunc(String(a.title), 60)}”` }
+        : { pre: "创建自动化" };
     default:
-      return { pre: `Use ${name}` };
+      return { pre: `使用 ${name}` };
   }
 }
 
@@ -141,19 +171,27 @@ export function humanizeAsk(name: string, args: any): HumanLine {
   const a = args && typeof args === "object" ? args : {};
   switch (name) {
     case "run_shell":
-      return { pre: "Wanted to run ", obj: trunc(String(a.command ?? ""), 60) };
+      return { pre: "曾请求运行 ", obj: trunc(String(a.command ?? ""), 60) };
     case "write_file":
-      return { pre: "Wanted to write ", obj: baseName(String(a.path ?? "a file")) };
+      return { pre: "曾请求写入 ", obj: baseName(String(a.path ?? "文件")) };
     case "replace_in_file":
     case "apply_patch":
     case "apply_unified_diff":
-      return { pre: "Wanted to edit ", obj: a.path ? baseName(String(a.path)) : "files" };
+      return { pre: "曾请求编辑 ", obj: a.path ? baseName(String(a.path)) : "文件" };
     case "send_message": {
       const { platform, tail } = messageTarget(String(a.target ?? ""));
-      if (!tail) return { pre: "Wanted to send a message" };
-      return { pre: `Wanted to message `, obj: tail, post: ` on ${platform}` };
+      if (!tail) return { pre: "曾请求发送消息" };
+      return { pre: "曾请求发送消息至 ", obj: tail, post: `（${platform}）` };
     }
+    case "prepare_article_review":
+      return { pre: "曾请求生成文章文字预览：", obj: articleLabel(a) };
+    case "generate_article_assets":
+      return { pre: "曾请求为文章生成封面与配图：", obj: articleLabel(a) };
+    case "prepare_wechat_draft":
+      return { pre: "曾请求生成公众号最终图文预览：", obj: articleLabel(a) };
+    case "create_wechat_draft":
+      return { pre: "曾请求保存到公众号草稿箱：", obj: articleLabel(a) };
     default:
-      return { pre: `Wanted to use ${name}` };
+      return { pre: `曾请求使用 ${name}` };
   }
 }

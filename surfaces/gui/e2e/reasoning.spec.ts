@@ -8,21 +8,20 @@ test("thinking streams live, then persists as a collapsed disclosure on the answ
   page,
 }) => {
   await page.goto("/");
-  await page.getByText("Draft the launch note").first().click();
-  const box = page.getByPlaceholder(/Ask the coworker/);
+  const box = page.getByPlaceholder("告诉文枢你想完成什么...");
   await box.fill("think hard about this");
   await box.press("Enter");
 
   // Live phase: the Thinking… block is up while deltas tick in; expanding shows the trace.
-  await expect(page.getByText("Thinking…").first()).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("正在思考…").first()).toBeVisible({ timeout: 10_000 });
   await page.getByTestId("thinking-toggle").click();
   await expect(page.getByTestId("thinking-body")).toContainText("Weighing options.");
 
   // Finalized: the answer bubble carries a collapsed "Thought process" disclosure.
   await expect(page.getByText("Decision made.").first()).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText("Thinking…")).toHaveCount(0);
+  await expect(page.getByText("正在思考…")).toHaveCount(0);
   const toggle = page.getByTestId("thinking-toggle");
-  await expect(toggle).toHaveText(/Thought process/);
+  await expect(toggle).toHaveText(/思考过程/);
   await expect(page.getByTestId("thinking-body")).toHaveCount(0); // collapsed by default
   await toggle.click();
   await expect(page.getByTestId("thinking-body")).toContainText(

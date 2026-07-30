@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -73,12 +73,14 @@ _BRAND_COLORS = {
     "google_calendar": "#4285f4",
 }
 
+_BROWSER_PRODUCT_DISPLAY_NAME = "文枢 WenShu"
+
 
 def _browser_page(
     title: str, detail: str, *, ok: bool = True, error: str = "", connector: str = ""
 ) -> str:
     """The page shown in the user's browser at the end of a loopback flow (sign-in or
-    connector callback) — one branded card (UX-DECISIONS §30): OCW mark, ok/fail icon
+    connector callback) — one branded card (UX-DECISIONS §30): 文枢 mark, ok/fail icon
     (the connector's initial rides the ✓), the friendly detail, and the raw error
     preserved on failures (it's the debugging breadcrumb). Inline CSS, light/dark via
     prefers-color-scheme, no external assets — it must render offline."""
@@ -96,7 +98,7 @@ def _browser_page(
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-        f"<title>{_html.escape(title)} — OpenWorker</title><style>"
+        f"<title>{_html.escape(title)} — {_BROWSER_PRODUCT_DISPLAY_NAME}</title><style>"
         ":root{--paper:#f6f5f2;--panel:#fff;--line:#e4e2dc;--ink:#2c2c2a;--muted:#6f6e68;"
         "--faint:#a3a19a;--accent:#3670b2;--ok:#2e7d4f;--ok-soft:#e3f2e9;--bad:#b3423a;"
         "--bad-soft:#f8e7e5}"
@@ -128,9 +130,9 @@ def _browser_page(
         "padding:7px 10px;margin-top:12px;text-align:left;word-break:break-word}"
         ".foot{font-size:10.5px;color:var(--faint)}"
         "</style></head><body>"
-        '<div class="card"><div class="mark"><i></i>OpenWorker</div>'
+        f'<div class="card"><div class="mark"><i></i>{_BROWSER_PRODUCT_DISPLAY_NAME}</div>'
         f"{icon}<h1>{_html.escape(title)}</h1><p>{_html.escape(detail)}</p>{err}</div>"
-        '<div class="foot">Served locally by OpenWorker on your Mac</div>'
+        f'<div class="foot">Served locally by {_BROWSER_PRODUCT_DISPLAY_NAME} on this device</div>'
         "</body></html>"
     )
 
@@ -145,7 +147,7 @@ def _connector_title(name: str) -> str:
 
 _CONNECT_FAILED_DETAIL = (
     "Something went wrong finishing this connection. "
-    "Close this tab and try again from OpenWorker."
+    "Close this tab and try again from 文枢."
 )
 
 from ..attachments import (
@@ -156,10 +158,10 @@ from ..attachments import (
     build_user_content,
 )
 from ..engine import ApprovalOutcome
-from ..inbox import VIS_INBOX, VIS_INLINE, args_preview
+from ..inbox import VIS_INBOX, VIS_INLINE
 from ..permissions import Mode
 from ..providers import AssistantTurn
-from .manager import SessionManager
+from .manager import SessionManager, _approval_body
 
 
 def create_app(manager: SessionManager) -> FastAPI:
@@ -217,7 +219,7 @@ def create_app(manager: SessionManager) -> FastAPI:
         ):
             return await call_next(request)
         return JSONResponse(
-            {"error": "missing or invalid OpenWorker sidecar token"},
+            {"error": "missing or invalid 文枢 sidecar token"},
             status_code=401,
         )
 
@@ -231,6 +233,11 @@ def create_app(manager: SessionManager) -> FastAPI:
     )
     app.state.manager = manager
 
+    def require_feature(name: str) -> JSONResponse | None:
+        if manager.product.features.get(name, False):
+            return None
+        return JSONResponse({"error": "feature disabled"}, status_code=404)
+
     @app.get("/v1/health")
     def health(request: Request) -> dict[str, Any]:
         if api_token and not _request_authenticated(request):
@@ -239,6 +246,7 @@ def create_app(manager: SessionManager) -> FastAPI:
             "status": "ok",
             "default_workspace": manager.default_workspace,
             "model": manager.model,
+            "product": manager.product.to_dict(),
         }
 
     @app.get("/v1/agents")
@@ -403,20 +411,21 @@ def create_app(manager: SessionManager) -> FastAPI:
         connector = str(body.get("connector", "")).strip()
         if not connector:
             return {"ok": False, "error": "connector required"}
-        if body.get("clear"):
-            manager.session_connections.clear(session_id, connector)
-        else:
-            manager.session_connections.set(
-                session_id, connector, bool(body.get("enabled", False))
-            )
         persona = str(body.get("persona", "")) or None
-        return {
-            "ok": True,
-            "connections": manager.session_connections_view(session_id, persona),
-        }
+        return manager.set_session_connection(
+            session_id,
+            connector,
+            enabled=bool(body.get("enabled", False)),
+            clear=bool(body.get("clear")),
+            persona_id=persona,
+        )
 
     @app.post("/v1/personas/install")
     def install_persona(body: dict) -> dict[str, Any]:
+        if body.get("gallery_slug"):
+            disabled = require_feature("gallery")
+            if disabled is not None:
+                return disabled
         # Returns a consent summary per persona; they land disabled pending the user's approval
         # (then POST /v1/personas/{id} {enabled:true, surfaced:true}).
         reg = manager.personas
@@ -468,6 +477,9 @@ def create_app(manager: SessionManager) -> FastAPI:
     def cloud_gallery_detail(slug: str) -> dict[str, Any]:
         """Solo page for one gallery coworker: publisher pitch + capabilities
         derived locally from the manifest (same parser as install)."""
+        disabled = require_feature("gallery")
+        if disabled is not None:
+            return disabled
         from .. import cloud
         from ..config import load_config
 
@@ -480,6 +492,9 @@ def create_app(manager: SessionManager) -> FastAPI:
     def cloud_gallery() -> dict[str, Any]:
         """Gallery cards for the GUI. Signed out ⇒ ok:false (the gallery is a
         signed-in feature by design; local personas are unaffected)."""
+        disabled = require_feature("gallery")
+        if disabled is not None:
+            return disabled
         from .. import cloud
         from ..config import load_config
 
@@ -708,7 +723,7 @@ def create_app(manager: SessionManager) -> FastAPI:
             return HTMLResponse(
                 _browser_page(
                     "Sign-in failed",
-                    "The service reported an error. Return to OpenWorker and try again.",
+                    "The service reported an error. Return to 文枢 and try again.",
                     ok=False,
                     error=error,
                 ),
@@ -718,7 +733,7 @@ def create_app(manager: SessionManager) -> FastAPI:
             return HTMLResponse(
                 _browser_page(
                     "Nothing waiting for this sign-in",
-                    "The sign-in may have timed out. Return to OpenWorker and start it again.",
+                    "The sign-in may have timed out. Return to 文枢 and start it again.",
                     ok=False,
                 ),
                 status_code=400,
@@ -726,7 +741,7 @@ def create_app(manager: SessionManager) -> FastAPI:
         return HTMLResponse(
             _browser_page(
                 "Connected",
-                "Sign-in complete. You can close this tab and return to OpenWorker.",
+                "Sign-in complete. You can close this tab and return to 文枢.",
                 ok=True,
             )
         )
@@ -739,6 +754,32 @@ def create_app(manager: SessionManager) -> FastAPI:
     @app.get("/v1/connectors")
     def connectors_list() -> dict[str, Any]:
         return {"connectors": manager.list_connectors()}
+
+    @app.get("/v1/connectors/wechat_official/settings")
+    def wechat_official_settings() -> Any:
+        try:
+            return manager.wechat_official_settings()
+        except LookupError as error:
+            return JSONResponse(
+                {"error": str(error)},
+                status_code=409,
+            )
+
+    @app.patch("/v1/connectors/wechat_official/settings")
+    def update_wechat_official_settings(body: Any = Body(default=None)) -> Any:
+        try:
+            return manager.update_wechat_official_settings(body)
+        except ValueError as error:
+            return JSONResponse(
+                {"error": str(error)},
+                status_code=400,
+            )
+        except LookupError as error:
+            return JSONResponse(
+                {"error": str(error)},
+                status_code=409,
+            )
+
 
     async def _refresh_listeners_if_two_way(name: str) -> None:
         # New/removed creds only take effect when the platform socket reconnects (Socket Mode
@@ -769,6 +810,11 @@ def create_app(manager: SessionManager) -> FastAPI:
 
     @app.post("/v1/connectors/{name}/mcp-connect")
     async def connector_mcp_connect(name: str) -> dict[str, Any]:
+        if name not in manager.product.visible_connectors:
+            return {
+                "ok": False,
+                "error": f"connector not available in this product: {name}",
+            }
         # One-click connect for an MCP-backed connector: the browser OAuth flow can
         # take minutes, so it runs in the background; the GUI polls /v1/connectors
         # until the card flips to connected (mode "mcp").
@@ -784,12 +830,16 @@ def create_app(manager: SessionManager) -> FastAPI:
     async def connector_disconnect(name: str) -> dict[str, Any]:
         # Managed profiles: best-effort flip of the cloud metadata record first
         # (network call → off the loop). Local deletion always proceeds.
-        from .. import cloud
-        from ..config import load_config
+        if (
+            manager.product.features.get("cloud", False)
+            and manager.product.features.get("managed_oauth", False)
+        ):
+            from .. import cloud
+            from ..config import load_config
 
-        await asyncio.to_thread(
-            lambda: cloud.cloud_disconnect(manager.secrets, load_config(), name)
-        )
+            await asyncio.to_thread(
+                lambda: cloud.cloud_disconnect(manager.secrets, load_config(), name)
+            )
         result = manager.disconnect_connector(name)
         await _refresh_listeners_if_two_way(name)
         return result
@@ -821,16 +871,21 @@ def create_app(manager: SessionManager) -> FastAPI:
     async def gmail_account_disconnect(email: str) -> dict[str, Any]:
         """Drop ONE mailbox (cloud metadata best-effort first, like a full
         disconnect); the default pointer moves to the next account."""
-        from .. import cloud
-        from ..config import load_config
         from ..connectors import gmail_accounts
 
         profile_key = gmail_accounts.PREFIX + email.strip().lower()
-        await asyncio.to_thread(
-            lambda: cloud.cloud_disconnect(
-                manager.secrets, load_config(), "gmail", profile_key=profile_key
+        if (
+            manager.product.features.get("cloud", False)
+            and manager.product.features.get("managed_oauth", False)
+        ):
+            from .. import cloud
+            from ..config import load_config
+
+            await asyncio.to_thread(
+                lambda: cloud.cloud_disconnect(
+                    manager.secrets, load_config(), "gmail", profile_key=profile_key
+                )
             )
-        )
         return gmail_accounts.disconnect_account(manager.secrets, email)
 
     @app.post("/v1/connectors/gmail/accounts/{email}/default")
@@ -857,19 +912,24 @@ def create_app(manager: SessionManager) -> FastAPI:
     async def gcal_account_disconnect(email: str) -> dict[str, Any]:
         """Drop ONE Google Calendar account (cloud metadata best-effort first);
         the default pointer moves to the next account."""
-        from .. import cloud
-        from ..config import load_config
         from ..connectors import gcal_accounts
 
         profile_key = gcal_accounts.PREFIX + email.strip().lower()
-        await asyncio.to_thread(
-            lambda: cloud.cloud_disconnect(
-                manager.secrets,
-                load_config(),
-                "google_calendar",
-                profile_key=profile_key,
+        if (
+            manager.product.features.get("cloud", False)
+            and manager.product.features.get("managed_oauth", False)
+        ):
+            from .. import cloud
+            from ..config import load_config
+
+            await asyncio.to_thread(
+                lambda: cloud.cloud_disconnect(
+                    manager.secrets,
+                    load_config(),
+                    "google_calendar",
+                    profile_key=profile_key,
+                )
             )
-        )
         return gcal_accounts.disconnect_account(manager.secrets, email)
 
     @app.post("/v1/connectors/google_calendar/accounts/{email}/default")
@@ -880,16 +940,21 @@ def create_app(manager: SessionManager) -> FastAPI:
 
     @app.post("/v1/connectors/hubspot/portals/{hub_id}/disconnect")
     async def hubspot_portal_disconnect(hub_id: str) -> dict[str, Any]:
-        from .. import cloud
-        from ..config import load_config
         from ..connectors import hubspot_portals
 
         profile_key = hubspot_portals.PREFIX + hub_id.strip()
-        await asyncio.to_thread(
-            lambda: cloud.cloud_disconnect(
-                manager.secrets, load_config(), "hubspot", profile_key=profile_key
+        if (
+            manager.product.features.get("cloud", False)
+            and manager.product.features.get("managed_oauth", False)
+        ):
+            from .. import cloud
+            from ..config import load_config
+
+            await asyncio.to_thread(
+                lambda: cloud.cloud_disconnect(
+                    manager.secrets, load_config(), "hubspot", profile_key=profile_key
+                )
             )
-        )
         return hubspot_portals.disconnect_portal(manager.secrets, hub_id)
 
     @app.post("/v1/connectors/hubspot/portals/{hub_id}/default")
@@ -902,14 +967,20 @@ def create_app(manager: SessionManager) -> FastAPI:
     async def account_disconnect(name: str, account_id: str) -> dict[str, Any]:
         """Generic per-account disconnect for account-patterned connectors
         (batch 2+). Gmail/Calendar keep their specific email routes."""
-        from .. import cloud
-        from ..config import load_config
         from ..connectors import accounts
 
         if not accounts.is_account_connector(name):
             return {"ok": False, "error": "not a multi-account connector"}
         _id, profile_key, profile = accounts.resolve(manager.secrets, name, account_id)
-        if profile and profile.get("managed"):
+        if (
+            profile
+            and profile.get("managed")
+            and manager.product.features.get("cloud", False)
+            and manager.product.features.get("managed_oauth", False)
+        ):
+            from .. import cloud
+            from ..config import load_config
+
             await asyncio.to_thread(
                 lambda: cloud.cloud_disconnect(
                     manager.secrets, load_config(), name, profile_key=profile_key
@@ -950,6 +1021,9 @@ def create_app(manager: SessionManager) -> FastAPI:
 
     @app.get("/v1/cloud/status")
     def cloud_status() -> dict[str, Any]:
+        disabled = require_feature("cloud")
+        if disabled is not None:
+            return disabled
         from .. import cloud
 
         return {
@@ -961,6 +1035,9 @@ def create_app(manager: SessionManager) -> FastAPI:
     def cloud_telemetry(body: dict) -> dict[str, Any]:
         """The Phase 5 opt-out toggle. Local preference only — signed-out users
         send nothing regardless of this value."""
+        disabled = require_feature("cloud")
+        if disabled is not None:
+            return disabled
         from .. import cloud
 
         return cloud.set_telemetry_enabled(
@@ -971,6 +1048,9 @@ def create_app(manager: SessionManager) -> FastAPI:
     def cloud_login() -> dict[str, Any]:
         """Start browser sign-in. The sidecar opens the system browser itself
         (works identically under Tauri and plain-browser dev)."""
+        disabled = require_feature("cloud")
+        if disabled is not None:
+            return disabled
         import webbrowser
 
         from .. import cloud
@@ -982,19 +1062,25 @@ def create_app(manager: SessionManager) -> FastAPI:
 
     @app.post("/v1/cloud/logout")
     def cloud_logout() -> dict[str, Any]:
+        disabled = require_feature("cloud")
+        if disabled is not None:
+            return disabled
         from .. import cloud
 
         return cloud.logout(manager.secrets)
 
     @app.get("/auth/callback")
     async def cloud_auth_callback(code: str = "", state: str = "", error: str = ""):
+        disabled = require_feature("cloud")
+        if disabled is not None:
+            return disabled
         from fastapi.responses import HTMLResponse
 
         from .. import cloud
         from ..config import load_config
 
         signin_failed_detail = (
-            "Close this tab and try signing in again from OpenWorker."
+            "Close this tab and try signing in again from 文枢."
         )
         if error:
             return HTMLResponse(
@@ -1036,7 +1122,7 @@ def create_app(manager: SessionManager) -> FastAPI:
             _browser_page(
                 "Signed in",
                 "You're signed in to OpenWorker Cloud. "
-                "You can close this tab and return to OpenWorker.",
+                "You can close this tab and return to 文枢.",
             )
         )
 
@@ -1048,6 +1134,9 @@ def create_app(manager: SessionManager) -> FastAPI:
         consent page in the system browser; the broker's callback page will
         form-POST the tokens to /oauth/callback below. `access` picks a consent
         tier by NAME (e.g. hubspot read | write) — the broker owns the scopes."""
+        disabled = require_feature("managed_oauth")
+        if disabled is not None:
+            return disabled
         import webbrowser
 
         from .. import cloud
@@ -1074,6 +1163,9 @@ def create_app(manager: SessionManager) -> FastAPI:
 
     @app.post("/oauth/callback")
     async def managed_oauth_callback(request: Request) -> Any:
+        disabled = require_feature("managed_oauth")
+        if disabled is not None:
+            return disabled
         from fastapi.responses import HTMLResponse
 
         from .. import cloud
@@ -1127,7 +1219,7 @@ def create_app(manager: SessionManager) -> FastAPI:
             return HTMLResponse(
                 _browser_page(
                     "GitHub connected",
-                    "You can close this tab and return to OpenWorker.",
+                    "You can close this tab and return to 文枢.",
                     connector="github",
                 )
             )
@@ -1190,7 +1282,7 @@ def create_app(manager: SessionManager) -> FastAPI:
         return HTMLResponse(
             _browser_page(
                 f"{_connector_title(connector)} connected",
-                "You can close this tab and return to OpenWorker.",
+                "You can close this tab and return to 文枢.",
                 connector=connector,
             )
         )
@@ -1295,6 +1387,11 @@ def create_app(manager: SessionManager) -> FastAPI:
         if not provider:
             return {"ok": False, "error": "provider required"}
         return manager.set_web_search(provider, (body or {}).get("api_key"))
+
+    @app.get("/v1/image-generation/status")
+    def image_generation_status() -> dict[str, Any]:
+        return manager.get_image_generation_status()
+
 
     # -- model providers (OpenAI, Ollama, …) ------------------------------------
     @app.get("/v1/providers")
@@ -1495,14 +1592,7 @@ def create_app(manager: SessionManager) -> FastAPI:
             item = manager.inbox.add_approval(
                 session_id,
                 f"Run `{_request.tool_name}`?",
-                body="\n".join(
-                    p
-                    for p in (
-                        (getattr(_request, "reason", "") or "").strip(),
-                        args_preview(getattr(_request, "arguments", None)),
-                    )
-                    if p
-                ),
+                body=_approval_body(_request),
                 inbox=_route(),
                 visibility=_visibility(),
                 # Automation-run context (manual "Run now" rides this socket): lets the

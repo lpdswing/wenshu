@@ -13,6 +13,7 @@ from .agents import Agent, AgentContext, code_agent
 from .automation import scheduling_tools
 from .selfwake import selfwake_tools
 from .subscriptions import subscription_tools
+from .content import make_content_tools
 from .config import load_config
 from .connectors import (
     connector_list,
@@ -21,6 +22,7 @@ from .connectors import (
     make_send_file_tool,
     make_send_message_tool,
 )
+from .connectors.descriptors import get_descriptor
 from .engine import Approver, TurnEngine
 from .environment import environment_context
 from .memory import MemoryStore, Scope, format_memories, memory_tools
@@ -29,6 +31,12 @@ from .project import load_agents_md
 from .roots import RootDir, normalize_roots, render_context
 from .providers import ProviderClient, ProviderRouter
 from .overrides import RiskOverrideStore
+from .product import ProductProfile, current_product
+from .image_generation import (
+    ImageGenerationProvider,
+    build_image_provider,
+    describe_image_provider,
+)
 from .secrets import SecretStore, state_dir
 from .skills import SkillLoader, skill_catalog_text, skill_tools
 from .tools import ToolRegistry
@@ -82,8 +90,15 @@ to the user as live progress. Don't narrate trivial single-call follow-ups, don'
 the previous line, and never let narration replace your final answer."""
 
 
-def _enabled_connector_tools(secrets: SecretStore) -> tuple[set[str], set[str]]:
-    connectors = {c["name"]: c for c in connector_list(secrets)}
+def _enabled_connector_tools(
+    secrets: SecretStore,
+    product: ProductProfile,
+) -> tuple[set[str], set[str]]:
+    connectors = {
+        c["name"]: c
+        for c in connector_list(secrets)
+        if c["name"] in product.visible_connectors
+    }
     enabled_connectors = {
         name
         for name, c in connectors.items()
@@ -97,6 +112,23 @@ def _enabled_connector_tools(secrets: SecretStore) -> tuple[set[str], set[str]]:
         if tool.get("enabled")
     }
     return enabled_connectors, enabled_tools
+
+
+def _extra_tool_visible(tool: Any, product: ProductProfile) -> bool:
+    """Keep ordinary and standalone MCP extras; gate descriptor-backed MCP connectors."""
+    name = getattr(tool, "__name__", "")
+    if not name.startswith("mcp__"):
+        return True
+    parts = name.split("__", 2)
+    if len(parts) != 3:
+        return True
+    connector = parts[1]
+    descriptor = get_descriptor(connector)
+    return (
+        descriptor is None
+        or not descriptor.mcp_url
+        or connector in product.visible_connectors
+    )
 
 
 def _skill_dirs(workspace: Optional[Path]) -> list[Path]:
@@ -121,6 +153,8 @@ def build_engine(
     messages: Optional[list[dict[str, Any]]] = None,
     extra_tools: Optional[list[Any]] = None,
     secrets: Optional[SecretStore] = None,
+    image_provider: Optional[ImageGenerationProvider] = None,
+    product: ProductProfile | None = None,
     task_store: Optional[Any] = None,
     wake_store: Optional[Any] = None,
     session_id: Optional[str] = None,
@@ -158,20 +192,53 @@ def build_engine(
         workspace=ws, executor=executor, todo=todo, roots=root_list or None
     )
 
+    product = product or current_product()
     registry = ToolRegistry()
     registry.register_all(agent.build_tools(context))
     # MCP / connector tools (supplied by the manager) carry their own metadata + schema.
     if extra_tools:
-        registry.register_all(extra_tools)
+        for tool in extra_tools:
+            if _extra_tool_visible(tool, product):
+                registry.register(tool)
     # Messaging personas (Cowork / Ops / MyHelper) expose send_message; MyHelper also uses it as
     # the reply path for inbound Telegram/Slack super-agent sessions.
     secrets = secrets or SecretStore()
-    if agent.messaging and any(s.enabled for s in load_settings(secrets).values()):
-        registry.register(make_send_message_tool(secrets))
+    if agent.content_tools and any(root.writable for root in root_list):
+        content = make_content_tools(
+            roots=lambda: (root.path for root in root_list if root.writable),
+            image_provider=(
+                image_provider
+                if image_provider is not None
+                else lambda: build_image_provider(secrets)
+            ),
+            image_provider_description=lambda: describe_image_provider(secrets),
+        )
+        registry.register(content.prepare_article_review)
+        registry.register(
+            content.generate_article_assets,
+            approval_arguments=content.generate_article_assets_approval_arguments,
+            approval_once_only=True,
+        )
+    messaging_enabled = any(
+        setting.enabled
+        for name, setting in load_settings(secrets).items()
+        if name in product.visible_connectors
+    )
+    if agent.messaging and messaging_enabled:
+        registry.register(
+            make_send_message_tool(
+                secrets, allowed_platforms=product.visible_connectors
+            )
+        )
         # send_file (§34): hand deliverables into the chat — same targets, but its OWN
         # approval surface (a thread's standing send_message grant never covers uploads).
         registry.register(
-            make_send_file_tool(secrets, workspace=ws, roots=root_list or None)
+            make_send_file_tool(
+                secrets,
+                workspace=ws,
+                roots=root_list or None,
+                allowed_platforms=product.visible_connectors,
+            )
         )
         # Channel subscriptions (inbound): listen to a channel, catch up, (un)subscribe. The agent
         # obtains a channel via ask_user or from a channel message it's reacting to.
@@ -188,7 +255,7 @@ def build_engine(
     if agent.family == "knowledge" and root_list:
         registry.register(request_directory_tool())
     if agent.connectors:
-        enabled_connectors, enabled_tools = _enabled_connector_tools(secrets)
+        enabled_connectors, enabled_tools = _enabled_connector_tools(secrets, product)
         # Per-session connection hierarchy (UI-REFRESH §4.3): when the caller supplies the session's
         # effective connector set, intersect it so only effective-enabled connectors expose tools.
         # Default None preserves CLI / direct callers (no per-session restriction).

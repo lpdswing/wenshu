@@ -4,6 +4,7 @@ import { defineConfig, devices } from "@playwright/test";
 // at the network layer (see e2e/fixtures.ts), so they run without the Python backend and never
 // mutate real state — safe for CI and for asserting regressions in the interaction flows.
 const PORT = 5199;
+const INTERACTIVE = process.argv.includes("--ui");
 
 export default defineConfig({
   testDir: "./e2e",
@@ -17,8 +18,11 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    // Dev server on a dedicated port so it never collides with a running `npm run dev` (5173).
-    command: `npm run dev -- --port ${PORT} --strictPort`,
+    // The dev server occasionally leaves a page half-booted during the full hermetic suite.
+    // Serve a fresh production build for deterministic test runs; keep HMR for Playwright UI.
+    command: INTERACTIVE
+      ? `npm run dev -- --port ${PORT} --strictPort`
+      : `npm run build && npm run preview -- --port ${PORT} --strictPort`,
     url: `http://localhost:${PORT}`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

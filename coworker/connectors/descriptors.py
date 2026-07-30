@@ -409,6 +409,52 @@ def _validate_outlook(creds: dict) -> ValidationResult:
     )
 
 
+def _validate_wechat_official(creds: dict) -> ValidationResult:
+    from .wechat.client import WeChatClient
+    from .wechat.credentials import WeChatCredentials
+    from .wechat.errors import (
+        WeChatAPIError,
+        WeChatCredentialError,
+        WeChatHTTPError,
+        WeChatResponseError,
+        WeChatTransportError,
+    )
+
+    try:
+        credentials = WeChatCredentials(
+            creds.get("app_id", ""),
+            creds.get("app_secret", ""),
+        )
+    except WeChatCredentialError:
+        return ValidationResult(False, error="AppID 或 AppSecret 不能为空。")
+
+    client = WeChatClient(credentials)
+    try:
+        client.get_access_token()
+    except WeChatAPIError as error:
+        messages = {
+            "invalid_credentials": "AppID 或 AppSecret 凭据无效，请检查后重试。",
+            "ip_allowlist": "当前出口 IP 不在公众号 IP 白名单中，请先在微信公众平台配置。",
+            "permission_denied": "该公众号接口权限不足，请检查账号类型和接口权限。",
+            "rate_limited": "微信接口调用过于频繁，请稍后重试。",
+        }
+        return ValidationResult(
+            False,
+            error=messages.get(error.kind, "微信凭据验证失败，请稍后重试。"),
+        )
+    except WeChatHTTPError as error:
+        if error.status_code == 429:
+            return ValidationResult(False, error="微信接口调用过于频繁，请稍后重试。")
+        return ValidationResult(False, error="微信接口暂时不可用，请稍后重试。")
+    except WeChatTransportError:
+        return ValidationResult(False, error="无法连接微信接口，请检查网络后重试。")
+    except WeChatResponseError:
+        return ValidationResult(False, error="微信接口返回异常，请稍后重试。")
+    finally:
+        client.close()
+    return ValidationResult(True, identity=credentials.app_id)
+
+
 _ALLOWED_FIELD = Field(
     key="allowed_users",
     label="Allowed user IDs",
@@ -604,6 +650,26 @@ DESCRIPTORS: list[ConnectorDescriptor] = [
             "No setup required. Browser tools are available to Cowork sessions."
         ],
         available=True,
+    ),
+    ConnectorDescriptor(
+        name="wechat_official",
+        title="微信公众号",
+        icon="微",
+        blurb="将已确认的图文保存到公众号草稿箱。",
+        auth="api_token",
+        two_way=False,
+        fields=[
+            Field("app_id", "AppID", placeholder="wx..."),
+            Field("app_secret", "AppSecret", secret=True),
+        ],
+        instructions=[
+            "登录微信公众平台，在开发 → 基本配置中查看 AppID 和 AppSecret。",
+            "将当前出口 IP 加入公众号 IP 白名单。",
+        ],
+        validate=_validate_wechat_official,
+        brand_color="#07C160",
+        logo="wechat",
+        account_field="@identity",
     ),
     ConnectorDescriptor(
         name="github",

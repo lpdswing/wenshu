@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from fastapi.testclient import TestClient
 
+from coworker.product import current_product
 from coworker.server import SessionManager, create_app
 
 
@@ -18,11 +21,222 @@ def _allow_managed_state(state: str = "s") -> None:
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("COWORKER_STATE_DIR", str(tmp_path / "state"))
+    product = replace(
+        current_product(),
+        id="openworker",
+        visible_connectors=current_product().visible_connectors
+        | {"gmail", "notion", "telegram"},
+        features={name: True for name in current_product().features},
+    )
+    manager = SessionManager(workspace=tmp_path, product=product)
+    app = create_app(manager)
+    with TestClient(app) as c:
+        c.manager = manager
+        yield c
+
+
+@pytest.fixture
+def wenshu_client(tmp_path, monkeypatch):
+    monkeypatch.setenv("COWORKER_STATE_DIR", str(tmp_path / "state"))
     manager = SessionManager(workspace=tmp_path)
     app = create_app(manager)
     with TestClient(app) as c:
         c.manager = manager
         yield c
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "kwargs"),
+    [
+        ("get", "/v1/cloud/status", {}),
+        ("post", "/v1/cloud/telemetry", {"json": {"enabled": False}}),
+        ("post", "/v1/cloud/login", {}),
+        ("post", "/v1/cloud/logout", {}),
+        ("get", "/auth/callback", {"params": {"code": "c", "state": "s"}}),
+        ("get", "/v1/cloud/gallery", {}),
+        ("get", "/v1/cloud/gallery/sales", {}),
+        ("post", "/v1/personas/install", {"json": {"gallery_slug": "sales"}}),
+        ("post", "/v1/connectors/notion/connect-managed", {}),
+        (
+            "post",
+            "/oauth/callback",
+            {
+                "data": {
+                    "connector": "notion",
+                    "access_token": "token",
+                    "app_state": "s",
+                }
+            },
+        ),
+    ],
+)
+def test_upstream_routes_are_disabled_for_wenshu(
+    wenshu_client, method, path, kwargs
+):
+    response = getattr(wenshu_client, method)(path, **kwargs)
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "feature disabled"}
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "cloud_call", "kwargs"),
+    [
+        ("post", "/v1/cloud/login", "begin_login", {}),
+        ("get", "/auth/callback", "complete_login", {"params": {"code": "c"}}),
+        ("get", "/v1/cloud/gallery", "gallery_list", {}),
+        (
+            "post",
+            "/v1/connectors/notion/connect-managed",
+            "begin_managed_connect",
+            {},
+        ),
+    ],
+)
+def test_disabled_routes_return_before_upstream_calls(
+    wenshu_client, monkeypatch, method, path, cloud_call, kwargs
+):
+    from coworker import cloud
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError(f"{cloud_call} must not run")
+
+    monkeypatch.setattr(cloud, cloud_call, forbidden)
+
+    response = getattr(wenshu_client, method)(path, **kwargs)
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "feature disabled"}
+
+
+
+def test_new_session_skips_cloud_telemetry_when_cloud_is_disabled(
+    wenshu_client, monkeypatch
+):
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("disabled Cloud must not start a telemetry worker")
+
+    monkeypatch.setattr(
+        wenshu_client.manager, "_emit_session_created", forbidden
+    )
+
+    wenshu_client.manager.get_engine("local-only")
+
+
+@pytest.mark.parametrize(
+    ("path", "profiles", "deleted_key"),
+    [
+        (
+            "/v1/connectors/gmail/disconnect",
+            {"gmail:default": {"type": "oauth", "managed": True}},
+            "gmail:default",
+        ),
+        (
+            "/v1/connectors/gmail/accounts/a%40b.c/disconnect",
+            {
+                "gmail:account:a@b.c": {
+                    "type": "oauth",
+                    "managed": True,
+                    "access_token": "token",
+                },
+                "gmail:default": {
+                    "type": "oauth",
+                    "enabled": True,
+                    "default_account": "a@b.c",
+                },
+            },
+            "gmail:account:a@b.c",
+        ),
+        (
+            "/v1/connectors/google_calendar/accounts/a%40b.c/disconnect",
+            {
+                "google_calendar:account:a@b.c": {
+                    "type": "oauth",
+                    "managed": True,
+                    "access_token": "token",
+                },
+                "google_calendar:default": {
+                    "type": "oauth",
+                    "enabled": True,
+                    "default_account": "a@b.c",
+                },
+            },
+            "google_calendar:account:a@b.c",
+        ),
+        (
+            "/v1/connectors/hubspot/portals/123/disconnect",
+            {
+                "hubspot:portal:123": {
+                    "type": "oauth",
+                    "managed": True,
+                    "token": "token",
+                    "hub_id": "123",
+                },
+                "hubspot:default": {
+                    "type": "oauth",
+                    "enabled": True,
+                    "default_portal": "123",
+                },
+            },
+            "hubspot:portal:123",
+        ),
+        (
+            "/v1/connectors/outlook/accounts/a%40b.c/disconnect",
+            {
+                "outlook:account:a@b.c": {
+                    "type": "oauth",
+                    "managed": True,
+                    "access_token": "token",
+                },
+                "outlook:default": {
+                    "type": "oauth",
+                    "enabled": True,
+                    "default_account": "a@b.c",
+                },
+            },
+            "outlook:account:a@b.c",
+        ),
+    ],
+)
+def test_disabled_cloud_disconnects_stay_local(
+    wenshu_client, monkeypatch, path, profiles, deleted_key
+):
+    from coworker import cloud
+
+    for key, profile in profiles.items():
+        wenshu_client.manager.secrets.put(key, profile)
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("disabled Cloud must not receive disconnect metadata")
+
+    monkeypatch.setattr(cloud, "cloud_disconnect", forbidden)
+
+    response = wenshu_client.post(path)
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert wenshu_client.manager.secrets.get(deleted_key) is None
+
+
+def test_enabled_cloud_disconnect_still_cleans_upstream_metadata(
+    client, monkeypatch
+):
+    from coworker import cloud
+
+    client.manager.secrets.put(
+        "gmail:default", {"type": "oauth", "managed": True}
+    )
+    calls = []
+    monkeypatch.setattr(
+        cloud,
+        "cloud_disconnect",
+        lambda *_args, **_kwargs: calls.append("gmail"),
+    )
+
+    response = client.post("/v1/connectors/gmail/disconnect")
+
+    assert response.json()["ok"] is True
+    assert calls == ["gmail"]
 
 
 def test_cloud_status_signed_out(client):
@@ -62,7 +276,8 @@ def test_oauth_callback_writes_profile_and_returns_page(client):
     assert resp.status_code == 200
     # §30: the loopback page is a branded card, Title-cased connector name.
     assert "Gmail connected" in resp.text
-    assert "Served locally by OpenWorker" in resp.text
+    assert "Served locally by 文枢 WenShu" in resp.text
+    assert "OpenWorker" not in resp.text
 
     # Multi-account: the callback lands in gmail:account:<email>; gmail:default
     # is just the default pointer.

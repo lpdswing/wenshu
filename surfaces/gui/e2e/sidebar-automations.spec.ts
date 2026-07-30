@@ -4,7 +4,7 @@
 // seen: the badge clears immediately via the AUTOMATIONS_CHANGED broadcast, and
 // runs newer than the pre-open mark wear a "new" pill inside the detail.
 import { expect } from "@playwright/test";
-import { test } from "./fixtures";
+import { wenshuTest as test } from "./fixtures";
 
 test("nav row + Scheduled band render with unseen badges; runs stay out of Recent", async ({
   page,
@@ -15,7 +15,7 @@ test("nav row + Scheduled band render with unseen badges; runs stay out of Recen
   // Scheduled entry alone carries the count).
   const nav = page.getByTestId("nav-automations");
   await expect(nav).toBeVisible();
-  await expect(nav).toContainText("Automations");
+  await expect(nav).toContainText("自动化");
   await expect(nav).not.toContainText("2");
 
   // Scheduled band: one entry PER AUTOMATION — never per run. The noisy task wears

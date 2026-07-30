@@ -14,5 +14,5 @@ test("picker shows a disabled Loading-models chip until the list arrives", async
   const chip = page.getByTestId("models-loading");
   await expect(chip).toBeVisible();
   await expect(chip).toBeDisabled();
-  await expect(chip).toContainText("Loading models…");
+  await expect(chip).toContainText("正在加载模型…");
 });

@@ -3,12 +3,10 @@
 // (One click | Manual), per-workspace disconnect (stop-relaying-only), and the
 // manual Socket-Mode card so neither connect path regresses.
 import { expect } from "@playwright/test";
-import { test } from "./fixtures";
+import { openAccountPage, test } from "./fixtures";
 
 async function openSlackPage(page) {
-  await page.goto("/");
-  await page.getByTestId("account-row").click();
-  await page.getByRole("button", { name: "Connectors", exact: true }).click();
+  await openAccountPage(page, "connectors");
   await page.getByTestId("connector-slack").click();
 }
 

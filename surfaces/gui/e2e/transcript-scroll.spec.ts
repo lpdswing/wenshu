@@ -15,8 +15,7 @@ const scrollerState = `(() => {
 
 test("scrolling up mid-stream pins the viewport; jump-to-latest re-engages", async ({ page }) => {
   await page.goto("/");
-  await page.getByText("Draft the launch note").first().click();
-  const box = page.getByPlaceholder(/Ask the coworker/);
+  const box = page.getByPlaceholder("告诉文枢你想完成什么...");
   await box.fill("stream the epic");
   await box.press("Enter");
 
@@ -64,8 +63,7 @@ test("scrolling up mid-stream pins the viewport; jump-to-latest re-engages", asy
 
 test("bubbles carry hover copy + timestamp without layout shift", async ({ page }) => {
   await page.goto("/");
-  await page.getByText("Draft the launch note").first().click();
-  const box = page.getByPlaceholder(/Ask the coworker/);
+  const box = page.getByPlaceholder("告诉文枢你想完成什么...");
   await box.fill("hello meta");
   await box.press("Enter");
   await expect(page.getByText("Echo: hello meta", { exact: false }).first()).toBeVisible();
@@ -79,5 +77,5 @@ test("bubbles carry hover copy + timestamp without layout shift", async ({ page 
 
   // Copy actually copies (the fixture page runs with clipboard permission in Chromium).
   await meta.first().click();
-  await expect(page.getByText("Copied").first()).toBeVisible();
+  await expect(page.getByText("已复制").first()).toBeVisible();
 });

@@ -2,12 +2,10 @@
 // park→approve-only flow) and resolve channel NAMES to ids in the channel picker.
 // Both are reads on scopes every install already granted — no consent bump.
 import { expect } from "@playwright/test";
-import { test } from "./fixtures";
+import { openAccountPage, test } from "./fixtures";
 
 async function openSlackPage(page) {
-  await page.goto("/");
-  await page.getByTestId("account-row").click();
-  await page.getByRole("button", { name: "Connectors", exact: true }).click();
+  await openAccountPage(page, "connectors");
   await page.getByTestId("connector-slack").click();
 }
 
@@ -51,7 +49,7 @@ test("channel typeahead: a NAME resolves to the workspace's id-address", async (
   await page.goto("/");
   await page.getByText("Draft the launch note").first().click();
   await page.getByTestId("access-toggle").click();
-  await page.getByRole("button", { name: /Channels · 0/ }).click();
+  await page.getByRole("button", { name: /频道 · 0/ }).click();
 
   const input = page.getByPlaceholder("slack:C0123 or channel link");
   await input.fill("launch");
@@ -64,15 +62,15 @@ test("channel typeahead: a NAME resolves to the workspace's id-address", async (
   // the raw address survives underneath — the tooltip carries it and Add subscribes by id.
   await expect(input).toHaveValue("#launch-team");
   await expect(input).toHaveAttribute("title", "slack:T1DL/C9LAUNCH");
-  await page.getByRole("button", { name: "Add", exact: true }).click();
-  await expect(page.getByText(/Subscribed channels · 1/)).toBeVisible();
+  await page.getByRole("button", { name: "添加", exact: true }).click();
+  await expect(page.getByText(/已订阅频道 · 1/)).toBeVisible();
 });
 
 test("channel typeahead: private and not-a-member states are honest", async ({ page }) => {
   await page.goto("/");
   await page.getByText("Draft the launch note").first().click();
   await page.getByTestId("access-toggle").click();
-  await page.getByRole("button", { name: /Channels · 0/ }).click();
+  await page.getByRole("button", { name: /频道 · 0/ }).click();
 
   await page.getByPlaceholder("slack:C0123 or channel link").fill("l");
   await expect(page.getByTestId("roster-channel-slack:T1DL/C8LEADS")).toContainText("🔒");

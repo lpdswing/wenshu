@@ -1,4 +1,4 @@
-//! OpenWorker desktop shell.
+//! 文枢 desktop shell.
 //!
 //! Tauri is a thin native window over the existing React SPA. It:
 //!   1. picks a free localhost port and starts the Python `openworker-server` as a managed
@@ -29,6 +29,11 @@ use tauri::{
 };
 use tauri_plugin_autostart::ManagerExt;
 use uuid::Uuid;
+
+// User-facing product copy belongs here. Protocol and compatibility identifiers below
+// intentionally retain their existing `coworker` / `openworker-server` spellings.
+const PRODUCT_NAME: &str = "文枢";
+const OPEN_PRODUCT_LABEL: &str = "Open 文枢";
 
 /// The sidecar server child — killed on exit (orphaned servers have bitten us before).
 struct ServerProcess(Mutex<Option<Child>>);
@@ -483,11 +488,9 @@ fn show_main(app: &tauri::AppHandle) {
 }
 
 // --- Auto-update (tauri-plugin-updater) -------------------------------------------
-// The GUI drives updates through these commands (same invoke bridge as everything
-// else — no global plugin JS): check, background pre-download, install. Update
-// artifacts are minisign-verified against the pubkey in tauri.conf.json before
-// anything is installed; the manifest lives at the endpoints configured there
-// (download.openworker.com → GitHub Releases).
+// The commands stay available for updater-enabled product profiles, but 文枢 disables every
+// GUI entry point through Health's `features.updater` gate. Its Tauri config intentionally has
+// no updater endpoint or public key, so the disabled path cannot contact upstream services.
 
 #[derive(serde::Serialize)]
 struct UpdateInfo {
@@ -690,7 +693,7 @@ pub fn run() {
             //    Overlay title bar (macOS): traffic lights float over the edge-to-edge UI.
             let mut builder =
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                    .title("OpenWorker")
+                    .title(PRODUCT_NAME)
                     .inner_size(1360.0, 900.0)
                     .min_inner_size(980.0, 640.0)
                     // Let the WEBVIEW receive OS file drags: Tauri's own drag-drop handler
@@ -722,7 +725,8 @@ pub fn run() {
             });
 
             // 3. System tray: Open / Settings / Quit.
-            let open_i = MenuItem::with_id(app, "open", "Open OpenWorker", true, None::<&str>)?;
+            let open_i =
+                MenuItem::with_id(app, "open", OPEN_PRODUCT_LABEL, true, None::<&str>)?;
             let settings_i = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open_i, &settings_i, &quit_i])?;
@@ -731,7 +735,7 @@ pub fn run() {
             // it for light/dark automatically — not the full-color app icon.
             let tray_icon = tauri::image::Image::new(include_bytes!("../icons/tray.rgba"), 44, 44);
             TrayIconBuilder::new()
-                .tooltip("OpenWorker")
+                .tooltip(PRODUCT_NAME)
                 .icon(tray_icon)
                 .icon_as_template(true)
                 .menu(&menu)
@@ -753,7 +757,7 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("error while building the OpenWorker desktop app")
+        .expect("error while building the 文枢 desktop app")
         .run(|app, event| {
             // Also on Exit: belt-and-suspenders in case a quit path reaches teardown without
             // a preceding ExitRequested (observed with macOS Cmd+Q under the tray setup).

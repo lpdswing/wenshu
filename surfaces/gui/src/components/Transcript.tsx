@@ -35,10 +35,10 @@ function BubbleMeta({ text, ts, align }: { text: string; ts?: number; align: "le
         <button
           className="flex items-center cursor-pointer hover:text-muted"
           data-testid="bubble-copy"
-          title="Copy message"
+          title="复制消息"
           onClick={copy}
         >
-          {copied ? "Copied" : <Icon name="copy" size={11} />}
+          {copied ? "已复制" : <Icon name="copy" size={11} />}
         </button>
         {when && (
           <span data-testid="bubble-ts" title={when.toLocaleString()}>
@@ -64,7 +64,7 @@ export function ThinkingBlock({ text, live }: { text: string; live?: boolean }) 
       >
         <Icon name="chevronDown" size={12} className={"thinking-caret" + (open ? " open" : "")} />
         <span className={live ? "thinking-live" : undefined}>
-          {live ? "Thinking…" : "Thought process"}
+          {live ? "正在思考…" : "思考过程"}
         </span>
       </button>
       {open && (
@@ -132,15 +132,23 @@ function buildRows(items: TurnItem[]): TurnRow[] {
   return rows;
 }
 
+const APPROVAL_DECISION_LABELS: Record<ApprovalDecision, string> = {
+  once: "批准一次",
+  deny: "拒绝",
+  always_tool: "本次会话始终允许",
+  always_command: "始终允许此命令",
+  always_task: "此自动化始终允许",
+};
+
 function approvalChip(resolved: ApprovalDecision | undefined) {
   if (resolved === "deny")
-    return <span className="text-[10.5px] px-1.5 rounded-full bg-dangerSoft text-danger shrink-0">✕ declined</span>;
+    return <span className="text-[10.5px] px-1.5 rounded-full bg-dangerSoft text-danger shrink-0">✕ 已拒绝</span>;
   return (
     <span
       className="text-[10.5px] px-1.5 rounded-full bg-okSoft text-ok shrink-0"
-      title={resolved ? `approved · ${resolved.replace(/_/g, " ")}` : "approved"}
+      title={resolved ? `已批准 · ${APPROVAL_DECISION_LABELS[resolved]}` : "已批准"}
     >
-      ✓ approved
+      ✓ 已批准
     </span>
   );
 }
@@ -155,14 +163,117 @@ function LineText({ line }: { line: HumanLine }) {
   );
 }
 
+type WeChatDraftStatus = "success" | "duplicate" | "failed" | "unknown";
+
+interface WeChatDraftResult {
+  status: WeChatDraftStatus;
+  title: string;
+  errorKind: string;
+  uploadedAssetCount: number | null;
+}
+
+function parseWeChatDraftResult(value: unknown): WeChatDraftResult | null {
+  if (!value || typeof value !== "object") return null;
+  if (
+    !("status" in value) ||
+    (value.status !== "success" &&
+      value.status !== "duplicate" &&
+      value.status !== "failed" &&
+      value.status !== "unknown")
+  ) {
+    return null;
+  }
+  const title = "title" in value ? value.title : undefined;
+  const errorKind = "error_kind" in value ? value.error_kind : undefined;
+  const uploadedAssetCount =
+    "uploaded_asset_count" in value ? value.uploaded_asset_count : undefined;
+  return {
+    status: value.status,
+    title: typeof title === "string" && title.trim() ? title.trim() : "",
+    errorKind: typeof errorKind === "string" ? errorKind.trim() : "",
+    uploadedAssetCount:
+      typeof uploadedAssetCount === "number" &&
+      Number.isInteger(uploadedAssetCount) &&
+      uploadedAssetCount >= 0
+        ? uploadedAssetCount
+        : null,
+  };
+}
+
+function WeChatDraftResultLine({ result }: { result: WeChatDraftResult | null }) {
+  if (!result) {
+    return (
+      <div className="text-[12px] text-warnInk" data-testid="wechat-draft-result">
+        公众号草稿结果暂不可读取，请先检查公众号后台
+      </div>
+    );
+  }
+
+  const statusText: Record<WeChatDraftStatus, string> = {
+    success: "已保存到公众号草稿箱",
+    duplicate: "公众号草稿已存在，未重复创建",
+    failed: "保存到公众号草稿箱失败",
+    unknown: "提交结果未知，请先检查公众号后台",
+  };
+  const errorText: Record<string, string> = {
+    invalid_credentials: "公众号凭据无效",
+    ip_allowlist: "公众号 IP 白名单未配置",
+    permission_denied: "公众号接口权限不足",
+    rate_limited: "公众号接口请求过于频繁",
+    timeout: "连接公众号超时",
+    network: "无法连接公众号",
+  };
+  const uncertain = result.status === "failed" || result.status === "unknown";
+  const tone =
+    result.status === "success" || result.status === "duplicate"
+      ? "text-ok"
+      : result.status === "unknown"
+        ? "text-warnInk"
+        : "text-danger";
+
+  return (
+    <div className="space-y-1 text-[12px]" data-testid="wechat-draft-result">
+      <div className={tone}>
+        {statusText[result.status]}
+        {result.title ? `：${result.title}` : ""}
+      </div>
+      {result.status === "failed" && errorText[result.errorKind] && (
+        <div className="text-muted">{errorText[result.errorKind]}</div>
+      )}
+      {uncertain && (
+        <div className="text-muted">
+          {result.uploadedAssetCount === null
+            ? "不可自动回滚的已上传素材数量待确认"
+            : `不可自动回滚的已上传素材：${result.uploadedAssetCount} 个`}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StepRow({ tool, approval }: { tool: ToolItem; approval?: ApprovalItem }) {
   const [raw, setRaw] = useState(false);
   const running = tool.status === "…";
-  const failed = tool.status !== "ok" && !running;
+  const wechatDraftResult =
+    tool.name === "create_wechat_draft"
+      ? parseWeChatDraftResult(tool.display?.wechat_draft_result)
+      : null;
+  const failed = wechatDraftResult
+    ? wechatDraftResult.status === "failed"
+    : tool.status !== "ok" && !running;
+  const statusTone = running
+    ? "text-accent"
+    : wechatDraftResult?.status === "unknown"
+      ? "text-warnInk"
+      : failed
+        ? "text-danger"
+        : "text-ok";
+  const showRawDetails =
+    tool.name !== "prepare_wechat_draft" && tool.name !== "create_wechat_draft";
   return (
     <div>
       <div className="group flex items-baseline gap-2 px-2 py-0.5 rounded-lg hover:bg-paper" data-testid="turn-step">
-        <span className={"w-3.5 text-center text-[10px] shrink-0 " + (failed ? "text-danger" : running ? "text-accent" : "text-ok")}>
+        <span className={"w-3.5 text-center text-[10px] shrink-0 " + statusTone}>
           {running ? <span className="spinner" data-testid="step-running" /> : "●"}
         </span>
         <LineText line={humanizeTool(tool.name, tool.args)} />
@@ -171,31 +282,38 @@ function StepRow({ tool, approval }: { tool: ToolItem; approval?: ApprovalItem }
           <span
             className="text-[10.5px] px-1.5 rounded-full bg-tealSoft text-tealInk shrink-0"
             data-testid="tool-standing-rule"
-            title={`Auto-allowed by this automation's standing approval: ${tool.standingRule}. Revoke on its Automations page.`}
+            title={`由此自动化的长期许可自动批准：${tool.standingRule}。可在“自动化”页面撤销。`}
           >
-            auto-allowed
+            自动允许
           </span>
         )}
         {!!tool.hidden && (
           <span
             className="text-[11px] text-warnInk shrink-0"
             data-testid="tool-hidden-count"
-            title="Removed by your privacy filters before the agent saw the results — agents get no trace of these."
+            title="结果在文枢看到前已被隐私过滤器移除，文枢不会看到任何痕迹。"
           >
-            {tool.hidden} hidden
+            已隐藏 {tool.hidden} 项
           </span>
         )}
-        {failed && <span className="text-[11px] text-danger shrink-0">{tool.status}</span>}
-        {!running && (
+        {failed && !wechatDraftResult && (
+          <span className="text-[11px] text-danger shrink-0">{tool.status}</span>
+        )}
+        {!running && showRawDetails && (
           <button
             className="ml-auto shrink-0 text-[11px] text-faint opacity-0 group-hover:opacity-100 cursor-pointer"
             onClick={() => setRaw((v) => !v)}
           >
-            raw
+            详情
           </button>
         )}
       </div>
-      {raw && (
+      {tool.name === "create_wechat_draft" && !running && tool.preview && (
+        <div className="ml-8 mr-2 my-1 px-2.5 py-1.5 rounded-lg border border-line bg-paper">
+          <WeChatDraftResultLine result={wechatDraftResult} />
+        </div>
+      )}
+      {raw && showRawDetails && (
         <pre className="ml-8 mr-2 my-1 px-2.5 py-1.5 rounded-lg border border-line bg-paper font-mono text-[11.5px] leading-relaxed text-muted whitespace-pre-wrap break-words max-h-56 overflow-auto">
           {`${tool.name}  ${shortArgs(tool.args)}`}
           {tool.preview ? `\n→ ${tool.preview.length > 1500 ? tool.preview.slice(0, 1500) + "\n…" : tool.preview}` : ""}
@@ -229,7 +347,7 @@ function TurnGroup({
   const nSteps = rows.filter((r) => r.type !== "narr").length;
   const declined = items.filter((it) => it.kind === "approval" && it.resolved === "deny").length;
   const hiddenTotal = tools.reduce((n, t) => n + (t.hidden || 0), 0);
-  const stepsLabel = `${nSteps} step${nSteps === 1 ? "" : "s"}`;
+  const stepsLabel = `${nSteps} 个步骤`;
 
   return (
     <details className="stepgroup" open={open}>
@@ -242,12 +360,12 @@ function TurnGroup({
       >
         <span className={"chev inline-block transition-transform" + (open ? " rotate-90" : "")}>›</span>
         <span>
-          <span>{running ? `Running ${stepsLabel}…` : stepsLabel}</span>
+          <span>{running ? `正在执行 ${stepsLabel}…` : stepsLabel}</span>
           {declined > 0 && (
             <>
               {" · "}
               <span className="text-danger" data-testid="stepgroup-declined">
-                {declined} declined
+                {declined} 个已拒绝
               </span>
             </>
           )}
@@ -255,7 +373,7 @@ function TurnGroup({
             <>
               {" · "}
               <span className="text-warnInk" data-testid="stepgroup-hidden">
-                {hiddenTotal} hidden by your filters
+                已按过滤器隐藏 {hiddenTotal} 项
               </span>
             </>
           )}
@@ -413,7 +531,7 @@ export function Transcript({ items, running, streamingText, onRetry }: Props) {
               );
             return (
               <div className="group bubble-assistant" key={bi}>
-                <div className="who">assistant</div>
+                <div className="who">文枢</div>
                 {item.reasoning && <ThinkingBlock text={item.reasoning} />}
                 <Markdown text={item.text} />
                 <BubbleMeta text={item.text} ts={item.ts} align="left" />
@@ -426,7 +544,7 @@ export function Transcript({ items, running, streamingText, onRetry }: Props) {
                 <span className={"status " + (item.resolved === "granted" ? "ok" : "denied")}>
                   {item.resolved === "granted" ? "✓" : "✕"}
                 </span>
-                <span>{item.resolved === "granted" ? "Granted folder access" : "Declined folder access"}</span>
+                <span>{item.resolved === "granted" ? "已授权访问文件夹" : "已拒绝访问文件夹"}</span>
                 {item.path && <span className="dim">{item.path}</span>}
               </div>
             );
@@ -434,13 +552,13 @@ export function Transcript({ items, running, streamingText, onRetry }: Props) {
             if (!item.resolved) return null; // pending plan renders in the composer head
             return (
               <div className="bubble-assistant" key={bi}>
-                <div className="who">proposed plan</div>
+                <div className="who">建议方案</div>
                 <Markdown text={item.plan} />
                 <div className="approval-inline">
                   <span className={"status " + (item.resolved === "approved" ? "ok" : "denied")}>
                     {item.resolved === "approved" ? "✓" : "✕"}
                   </span>
-                  <span>{item.resolved === "approved" ? "Plan approved" : "Sent back with feedback"}</span>
+                  <span>{item.resolved === "approved" ? "方案已批准" : "已退回并附上反馈"}</span>
                 </div>
               </div>
             );
@@ -450,7 +568,7 @@ export function Transcript({ items, running, streamingText, onRetry }: Props) {
                 {item.text}
                 {item.retriable && !running && onRetry && block.i === retryAnchor(items) && (
                   <button className="btn ml-2" data-testid="notice-retry" onClick={onRetry}>
-                    Retry
+                    重试
                   </button>
                 )}
               </div>

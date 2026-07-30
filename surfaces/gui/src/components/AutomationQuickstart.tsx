@@ -9,6 +9,7 @@ import {
   type CloudStatus,
   type Connector,
   type RecentChannel,
+  type ProductInfo,
 } from "../api";
 import { ConnectorBadge } from "../connectors/ConnectorIcon";
 import { ChannelPicker } from "./SubscriptionsChip";
@@ -147,12 +148,15 @@ const TEMPLATES: QuickTemplate[] = [
     instructions: () => "Sort my recent Downloads into tidy folders by file type.",
   },
 ];
+const LOCAL_TEMPLATES = TEMPLATES.filter((template) => template.conns.length === 0);
 
 export function AutomationQuickstart({
   busy,
+  features,
   onCreate,
 }: {
   busy: boolean;
+  features: ProductInfo["features"];
   onCreate: (payload: {
     title: string;
     instructions: string;
@@ -160,8 +164,11 @@ export function AutomationQuickstart({
     permissions?: { tool: string; target: string; access: "read" | "write" }[];
   }) => void;
 }) {
+  const managedConnectionsEnabled =
+    features.cloud === true && features.managed_oauth === true;
+  const templates = managedConnectionsEnabled ? TEMPLATES : LOCAL_TEMPLATES;
   const [pickedKey, setPickedKey] = useState<string | null>(null);
-  const picked = TEMPLATES.find((t) => t.key === pickedKey) || null;
+  const picked = templates.find((template) => template.key === pickedKey) || null;
 
   const [connectors, setConnectors] = useState<Connector[]>([]);
   const [cloud, setCloud] = useState<CloudStatus | null>(null);
@@ -182,24 +189,27 @@ export function AutomationQuickstart({
 
   const refresh = () => {
     getConnectors().then(setConnectors).catch(() => {});
-    getCloudStatus().then(setCloud).catch(() => {});
+    if (managedConnectionsEnabled) {
+      getCloudStatus().then(setCloud).catch(() => {});
+    } else {
+      setCloud(null);
+    }
   };
   // Connector state drives the card dots, so load once up front; poll only while a template
   // is being configured (connects and the cloud sign-in land out-of-band).
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollRef = useRef<number | undefined>(undefined);
   useEffect(() => {
     refresh();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [managedConnectionsEnabled]);
   useEffect(() => {
     if (!picked) return;
     refresh();
     getRecentChannels().then(setRecent).catch(() => {});
-    pollRef.current = setInterval(refresh, 3000);
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
+    pollRef.current = window.setInterval(refresh, 3000);
+    return () => window.clearInterval(pollRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pickedKey]);
+  }, [pickedKey, managedConnectionsEnabled]);
 
   const connState = (name: string) => connectors.find((c) => c.name === name);
   const allConnected = !picked || picked.conns.every((c) => connState(c.name)?.connected);
@@ -234,6 +244,7 @@ export function AutomationQuickstart({
   };
 
   const startConnect = async (name: string) => {
+    if (!managedConnectionsEnabled) return;
     if (!cloud?.signed_in) {
       setPendingConn(name); // the pane appears; sign-in completes it
       return;
@@ -257,6 +268,7 @@ export function AutomationQuickstart({
   useEffect(() => cancelSignin, []); // never leave the poll running after unmount
 
   const signInThenConnect = async () => {
+    if (!managedConnectionsEnabled) return;
     setSigninPhase("opening");
     await cloudLogin().catch(() => {});
     setSigninPhase("waiting");
@@ -311,7 +323,7 @@ export function AutomationQuickstart({
       {/* Equal-height cards (owner ask 2026-07-12): 1fr rows + h-full — <button> grid items
           don't stretch like divs. */}
       <div className="grid grid-cols-3 auto-rows-fr gap-3">
-        {TEMPLATES.map((t) => (
+        {templates.map((t) => (
           <button
             key={t.key}
             data-testid={`qs-template-${t.key}`}

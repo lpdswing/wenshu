@@ -24,6 +24,7 @@ import {
   type InboxItem,
   type MessageSource,
   type Persona,
+  type ProductInfo,
   type RecentWorkspace,
   type SurfaceVisibility,
   type WorkspaceCommandTrust,
@@ -31,7 +32,7 @@ import {
 import type { ApprovalDecision, Attachment, Item, SessionInfo, TodoItem, WsEvent } from "./types";
 import { isProjectScoped } from "./personaScope";
 import { baseName } from "./paths";
-import { itemsFromMessages } from "./itemsFromMessages";
+import { itemsFromMessages, modelChangedNotice, modelChangeHasImageWarning } from "./itemsFromMessages";
 import { streamMode } from "./streamGate";
 import { InboxItemCard } from "./components/InboxItemCard";
 import { isTauri, platformOS, startWindowDrag } from "./tauri";
@@ -61,9 +62,9 @@ const newId = () =>
   (crypto as any).randomUUID ? crypto.randomUUID().slice(0, 12) : Math.random().toString(36).slice(2, 14);
 
 const SUGGESTIONS = [
-  { ico: "⚙", text: "Run the test suite and summarize any failures." },
-  { ico: "✦", text: "Read the project and give me a 5-bullet overview." },
-  { ico: "↻", text: "Find and fix the failing build." },
+  { ico: "文", text: "整理这些资料，先生成一版文章草稿。" },
+  { ico: "图", text: "审阅文章后，为它规划封面和正文配图。" },
+  { ico: "微", text: "把确认后的文章整理成公众号草稿。" },
 ];
 
 // Tools whose success means a new/changed file should show up under Artifacts right away.
@@ -151,8 +152,10 @@ export function App() {
     useState<WorkspaceCommandTrust | null>(null);
   const [agent, setAgent] = useState("cowork");
   const [model, setModel] = useState("gpt-5.6-sol");
+  const [product, setProduct] = useState<ProductInfo | null>(null);
   const [models, setModels] = useState<string[]>([]);
   const [modelLabels, setModelLabels] = useState<Record<string, string>>({});
+  const modelLabelsRef = useRef<Record<string, string>>({});
   const [surfaces, setSurfaces] = useState<SurfaceVisibility>({ cowork: true, chat: false, code: false });
   const [mode, setMode] = useState("interactive");
   const [connected, setConnected] = useState(false);
@@ -376,7 +379,8 @@ export function App() {
   // On boot with no seeded workspace, reopen the last thing the user had — most recent
   // conversation (restores its folder + agent + transcript), else the most recent project
   // folder. Only a true first run (nothing to resume) falls through to the folder gate.
-  const resumeLastOrGate = async () => {
+  const resumeLastOrGate = async (defaultAgent: string) => {
+    setAgent(defaultAgent);
     let loadedSessions: SessionInfo[] = [];
     try {
       loadedSessions = (await getSessions()).filter((s) => s.session_id && !s.session_id.startsWith("__"));
@@ -407,7 +411,7 @@ export function App() {
       const recents = await getRecentWorkspaces();
       setProjects(recents);
       // Only auto-adopt a recent folder for gated surfaces (Code). Cowork starts orphan.
-      if (gatesWorkspace(agent)) {
+      if (gatesWorkspace(defaultAgent)) {
         const ws = recents.find((w) => w.exists) || recents[0];
         if (ws) {
           setWorkspace(ws.path);
@@ -418,7 +422,7 @@ export function App() {
     } catch {
       /* fall through */
     }
-    setShowGate(gatesWorkspace(agent)); // only Code forces a first-run folder gate
+    setShowGate(gatesWorkspace(defaultAgent)); // only project-scoped defaults force a first-run folder gate
   };
 
   useEffect(() => {
@@ -428,6 +432,9 @@ export function App() {
         .then(async (h) => {
           if (cancelled) return;
           setModel(h.model);
+          setProduct(h.product);
+          const defaultAgent = h.product.default_persona || "cowork";
+          setAgent(defaultAgent);
           // First-run setup wizard (desktop): show until the user completes/dismisses it.
           if (isTauri()) {
             getSettings()
@@ -439,8 +446,8 @@ export function App() {
           // initial sessionId would connect against an empty/stale workspace and the server
           // would provision a junk per-conversation scratch dir for it before resume could
           // flip to the real session. Cowork ignores default_workspace (a Code concept).
-          if (h.default_workspace && gatesWorkspace(agent)) setWorkspace(h.default_workspace);
-          else await resumeLastOrGate();
+          if (h.default_workspace && gatesWorkspace(defaultAgent)) setWorkspace(h.default_workspace);
+          else await resumeLastOrGate(defaultAgent);
           // The mount-time loadSettings races the sidecar boot and swallows its failure —
           // on a cold start that left "Loading models…" stuck until the user visited
           // Settings (owner-hit 2026-07-23). Health just answered, so this one lands.
@@ -481,8 +488,10 @@ export function App() {
   const loadSettings = () =>
     getSettings()
       .then((s) => {
+        const labels = s.model_labels || {};
         setModels(s.models || []);
-        setModelLabels(s.model_labels || {});
+        setModelLabels(labels);
+        modelLabelsRef.current = labels;
         setModelReady(s.model_ready);
         if (s.surfaces) setSurfaces(s.surfaces);
       })
@@ -635,6 +644,7 @@ export function App() {
               reason: d.reason,
               category: d.category,
               standingTarget: d.standing_target || undefined,
+              onceOnly: d.approval_once_only === true,
             },
           ]);
           break;
@@ -669,6 +679,7 @@ export function App() {
               d.name,
               d.status,
               d.result_preview || d.reason,
+              d.display,
               d.display?.hidden_by_filters,
               d.standing_rule,
             ),
@@ -681,29 +692,40 @@ export function App() {
           break;
         case "turn_end":
           if (d.status === "max_iterations_exceeded")
-            setItems((p) => [...p, { kind: "notice", tone: "warn", text: "Stopped: max iterations reached." }]);
+            setItems((p) => [...p, { kind: "notice", tone: "warn", text: "已停止：达到最大执行轮次。" }]);
           break;
         case "model_changed":
           // Mid-session switch (server-applied): update the header fact and drop the
           // persisted marker into the live transcript (replay renders it from history).
           if (d.model) setModel(d.model);
-          setItems((p) => [...p, { kind: "notice", tone: "info", text: d.text || "Model switched" }]);
+          setItems((p) => [
+            ...p,
+            {
+              kind: "notice",
+              tone: "info",
+              text: modelChangedNotice(
+                d.model,
+                modelLabelsRef.current,
+                modelChangeHasImageWarning(d.text),
+              ),
+            },
+          ]);
           break;
         case "interrupted":
           flushPartialStream();
-          setItems((p) => [...p, { kind: "notice", tone: "warn", text: "Interrupted." }]);
+          setItems((p) => [...p, { kind: "notice", tone: "warn", text: "已中断。" }]);
           break;
         case "error":
           flushPartialStream();
           setItems((p) => [
             ...p,
-            { kind: "notice", tone: "warn", text: "Error: " + (d.error || "unknown"), retriable: true },
+            { kind: "notice", tone: "warn", text: "错误：" + (d.error || "未知错误"), retriable: true },
           ]);
           break;
         case "input_rejected":
           setItems((p) => [
             ...p,
-            { kind: "notice", tone: "warn", text: d.error || "That message was rejected." },
+            { kind: "notice", tone: "warn", text: d.error || "这条消息未能提交。" },
           ]);
           break;
         case "turn_done":
@@ -1105,7 +1127,9 @@ export function App() {
   const subtitleParts = [modelDisplay];
   if (isProjectScoped(personaOf(agent)) && workspace) subtitleParts.push(baseName(workspace));
   const activeInfo = sessions.find((s) => s.session_id === sessionId);
-  const activeTitle = activeInfo?.title || "New session";
+  const activeTitle = activeInfo?.title || "新会话";
+
+  const productFeatures = product?.features ?? {};
 
   const desktop = isTauri();
   // Dev-only: `?overlay=1` simulates the desktop overlay layout in the browser (adds the
@@ -1129,7 +1153,7 @@ export function App() {
         {overlay && (
           <div className="titlebar-drag" data-tauri-drag-region>
             <span className="titlebar-brand brand-wordmark">
-              <Icon name="logo" size={13} className="mark" /> OpenWorker<span className="beta-tag">BETA</span>
+              <Icon name="logo" size={13} className="mark" /> 文枢<span className="beta-tag">BETA</span>
             </span>
           </div>
         )}
@@ -1138,13 +1162,13 @@ export function App() {
             <span /><span /><span />
           </div>
         )}
-        {/* The real OpenWorker mark (6-point star, same as the app/tray icon) — the old
+        {/* The real 文枢 mark (6-point star, same as the app/tray icon) — the old
             ✦ text glyph was a 4-point sparkle that read as another product's logo. */}
         <div className="boot-mark">
           <Icon name="logo" size={38} />
         </div>
         <div className="boot-text">
-          {resumedExisting ? "Restoring your session…" : "Starting OpenWorker…"}
+          {resumedExisting ? "正在恢复会话…" : "正在启动文枢…"}
           <span className="beta-tag">BETA</span>
         </div>
       </div>
@@ -1167,7 +1191,7 @@ export function App() {
         </div>
       )}
       {/* Desktop-only auto-update prompt (15s after boot, then every 30 min; inert in browser). */}
-      <UpdateBanner />
+      {productFeatures.updater === true && <UpdateBanner />}
       {/* UX-026: automation-start toast — quiet panel, neutral dot/drain, accent only
           on the action (rev 2); auto-dismisses with the 5s drain bar. */}
       {runToast && (
@@ -1177,10 +1201,10 @@ export function App() {
         >
           <div className="flex items-center gap-2 text-[12.5px] font-semibold">
             <span className="w-[7px] h-[7px] rounded-full bg-faint toast-pulse" />
-            Automation started
+            自动化已启动
           </div>
           <div className="text-[12.5px] text-muted mt-0.5 ml-[15px] truncate">
-            {runToast.title} · {runToast.time} run
+            {runToast.title} · {runToast.time} 执行
           </div>
           <div className="flex items-center justify-between ml-[15px] mt-1.5">
             <button
@@ -1191,12 +1215,12 @@ export function App() {
                 setRunToast(null);
               }}
             >
-              View run ›
+              查看执行 ›
             </button>
             <button
               className="text-[12px] text-faint px-0.5"
               data-testid="toast-dismiss"
-              title="Dismiss"
+              title="关闭"
               onClick={() => setRunToast(null)}
             >
               ✕
@@ -1223,19 +1247,25 @@ export function App() {
           className="nav-reveal-btn"
           onClick={toggleNav}
           onMouseEnter={() => setNavPeek(true)}
-          title="Show sidebar (⌘B)"
-          aria-label="Show sidebar"
+          title="显示侧边栏 (⌘B)"
+          aria-label="显示侧边栏"
         >
           <Icon name="sidebar" size={16} />
         </button>
       )}
       {onboarding && (
         <Onboarding
+          features={productFeatures}
           onDone={(next) => {
             setOnboarding(false);
-            getHealth().then((h) => setModel(h.model)).catch(() => {});
+            getHealth()
+              .then((h) => {
+                setModel(h.model);
+                setProduct(h.product);
+              })
+              .catch(() => {});
             loadSettings(); // pick up a model connected during setup (clears the composer chip)
-            if (next === "gallery") {
+            if (next === "gallery" && productFeatures.gallery === true) {
               // The specialists tip: land on Settings ▸ Personas, where the Gallery link lives.
               openSettings("personas");
             } else if (next === "automations") {
@@ -1254,6 +1284,7 @@ export function App() {
         agent={agent}
         workspace={workspace || ""}
         surfaces={surfaces}
+        features={productFeatures}
         sessions={sessions}
         projects={projects}
         activeSession={sessionId}
@@ -1290,6 +1321,7 @@ export function App() {
         <ScheduledView
           onOpenRun={openRunSession}
           onRunNow={runTaskNow}
+          features={productFeatures}
           initialOpenId={scheduledOpenId}
         />
       ) : surface === "integrations" ? (
@@ -1298,6 +1330,8 @@ export function App() {
         <SettingsView
           key={settingsTab}
           initialTab={settingsTab}
+          galleryEnabled={productFeatures.gallery === true}
+          updaterEnabled={productFeatures.updater === true}
           onOpenPersona={(id) => openPersona(id, "settings")}
         />
       ) : surface === "audit" ? (
@@ -1328,24 +1362,24 @@ export function App() {
                 <button
                   className="topbar-icon-btn"
                   onClick={toggleNav}
-                  aria-label="Show sidebar"
-                  title="Show sidebar (⌘B)"
+                  aria-label="显示侧边栏"
+                  title="显示侧边栏 (⌘B)"
                 >
                   <Icon name="sidebar" size={16} />
                 </button>
                 <button
                   className="topbar-icon-btn"
                   onClick={() => startNewSession()}
-                  aria-label="New session"
-                  title="New session"
+                  aria-label="新建会话"
+                  title="新建会话"
                 >
                   <Icon name="plus" size={16} />
                 </button>
                 <button
                   className="topbar-icon-btn"
                   onClick={() => setSearchOpen(true)}
-                  aria-label="Search"
-                  title="Search"
+                  aria-label="搜索"
+                  title="搜索"
                 >
                   <Icon name="search" size={16} />
                 </button>
@@ -1381,10 +1415,10 @@ export function App() {
                 className="topbar-artifacts-btn"
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={() => setRailHidden(false)}
-                title="Show files this conversation produced"
+                title="显示本会话生成的交付物"
               >
                 <Icon name="file" size={14} />
-                <span>Artifacts</span>
+                <span>交付物</span>
                 <span className="topbar-artifacts-count">{artifactCount}</span>
               </button>
             )}
@@ -1395,8 +1429,8 @@ export function App() {
                 className="topbar-icon-btn"
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={() => setRailHidden((h) => !h)}
-                aria-label={railHidden ? "Show side panel" : "Hide side panel"}
-                title={railHidden ? "Show side panel" : "Hide side panel"}
+                aria-label={railHidden ? "显示侧栏" : "隐藏侧栏"}
+                title={railHidden ? "显示侧栏" : "隐藏侧栏"}
               >
                 <Icon name="sidebarRight" size={16} />
               </button>
@@ -1416,14 +1450,14 @@ export function App() {
               >
                 <Icon name="clock" size={14} className="text-accent shrink-0" />
                 <span className="truncate text-muted">
-                  Scheduled run
+                  自动化执行
                   {runContext?.title ? (
                     <>
                       {" — "}
                       <span className="text-ink font-medium">{runContext.title}</span>
                     </>
                   ) : null}{" "}
-                  · started by an automation
+                  · 由自动化启动
                 </span>
                 <button
                   className="ml-auto shrink-0 text-accent font-medium hover:underline"
@@ -1432,7 +1466,7 @@ export function App() {
                     setSurface("scheduled");
                   }}
                 >
-                  ← Back to runs
+                  ← 返回执行记录
                 </button>
               </div>
             )}
@@ -1448,11 +1482,11 @@ export function App() {
                   <div className="hero">
                     <h1 className="greeting">
                       <span className="mark">✦</span>
-                      {agent === "chat" ? "How can I help?" : "Let's build something."}
+                      {agent === "chat" ? "有什么可以帮你？" : "一起开始创作。"}
                     </h1>
                     {needsWorkspace(agent) && (
                       <div className="suggestions">
-                        <div className="suggest-head">Try a task</div>
+                        <div className="suggest-head">试试这些任务</div>
                         {SUGGESTIONS.map((s, i) => (
                           <div className="suggest" key={i} onClick={() => workspace && send(s.text)}>
                             <span className="ico">{s.ico}</span>
@@ -1490,7 +1524,7 @@ export function App() {
                   {streaming && streamMode(streaming, items, running) === "answer" && (
                     <div className="transcript">
                       <div className="bubble-assistant">
-                        <div className="who">assistant</div>
+                        <div className="who">文枢</div>
                         <Markdown text={streaming} />
                         <span className="stream-cursor">▍</span>
                       </div>
@@ -1511,7 +1545,7 @@ export function App() {
                   onClick={followLatest}
                 >
                   <Icon name="chevronDown" size={13} />
-                  Jump to latest
+                  跳到最新内容
                 </button>
               </div>
             )}
@@ -1535,13 +1569,7 @@ export function App() {
               onUnattendedChange={agent !== "chat" ? toggleUnattended : undefined}
               prefill={composerPrefill}
               resetKey={sessionId}
-              placeholder={
-                agent === "code"
-                  ? "Ask the coder to build, fix, or explain…  (drop or paste files)"
-                  : agent === "chat"
-                    ? "Ask anything…  (drop or paste files)"
-                    : "Ask the coworker…  (drop or paste files)"
-              }
+              placeholder="告诉文枢你想完成什么..."
               approvalSlot={
                 // Live inline cards are for ATTENDED sessions only; when Unattended the prompt is
                 // parked in the Inbox and surfaced via the answer-in-context card below.
@@ -1652,7 +1680,7 @@ function WaitingForAgent() {
     <div className="waiting-transcript">
       <div className="waiting-row" aria-live="polite">
         <span className="waiting-spinner" />
-        <span>Waiting for agent...</span>
+        <span>文枢正在处理…</span>
       </div>
     </div>
   );
@@ -1663,6 +1691,7 @@ function updateLastTool(
   name: string,
   status: string,
   preview?: string,
+  display?: Record<string, unknown>,
   hidden?: number,
   standingRule?: string,
 ): Item[] {
@@ -1674,6 +1703,7 @@ function updateLastTool(
         ...it,
         status,
         preview,
+        ...(display ? { display } : {}),
         ...(hidden ? { hidden } : {}),
         ...(standingRule ? { standingRule } : {}),
       };

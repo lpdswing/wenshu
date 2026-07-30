@@ -8,6 +8,45 @@
 import type { ConversationMessage } from "./api";
 import type { Attachment, Item } from "./types";
 
+const MODEL_SWITCH_PREFIX = "Model switched to ";
+const MODEL_SWITCH_IMAGE_WARNING = " — earlier images can't be read by this model";
+
+const modelNotice = (label: string, imageWarning = false) =>
+  (label ? `已切换模型：${label}` : "已切换模型") +
+  (imageWarning ? " — 此模型无法读取之前的图片" : "");
+
+export function modelChangeHasImageWarning(text: unknown): boolean {
+  return (
+    typeof text === "string" &&
+    text.startsWith(MODEL_SWITCH_PREFIX) &&
+    text.endsWith(MODEL_SWITCH_IMAGE_WARNING)
+  );
+}
+
+export function modelChangedNotice(
+  model: unknown,
+  labels: Readonly<Record<string, string>> = {},
+  imageWarning = false,
+): string {
+  if (typeof model !== "string" || !model) return modelNotice("");
+  const label =
+    labels[model] || (model.includes(":") ? model.split(":").slice(1).join(":") : model);
+  return modelNotice(label, imageWarning);
+}
+
+function replayedModelChangeNotice(text: unknown): string {
+  if (typeof text !== "string") return modelNotice("");
+  if (text.startsWith("已切换模型")) return text;
+  if (!text.startsWith(MODEL_SWITCH_PREFIX)) return modelNotice("");
+
+  const persisted = text.slice(MODEL_SWITCH_PREFIX.length);
+  const warned = modelChangeHasImageWarning(text);
+  const label = warned
+    ? persisted.slice(0, -MODEL_SWITCH_IMAGE_WARNING.length)
+    : persisted;
+  return modelNotice(label, warned);
+}
+
 export function itemsFromMessages(messages: ConversationMessage[]): Item[] {
   const items: Item[] = [];
   // Index tool results by tool_call_id so replayed tool rows can show their output
@@ -16,12 +55,23 @@ export function itemsFromMessages(messages: ConversationMessage[]): Item[] {
   // `_display` sidecar on a tool message = user-facing metadata the agent never saw
   // (e.g. how many hits the privacy filters hid) — surfaces on the tool card.
   const hiddenCounts: Record<string, number> = {};
+  const displays: Record<string, Record<string, unknown>> = {};
   for (const m of messages || []) {
     if (m.role === "tool" && m.tool_call_id) {
       results[m.tool_call_id] =
         typeof m.content === "string" ? m.content : JSON.stringify(m.content);
       const hidden = Number(m._display?.hidden_by_filters || 0);
       if (hidden > 0) hiddenCounts[m.tool_call_id] = hidden;
+      const rawDisplay: unknown = m._display;
+      if (
+        rawDisplay &&
+        typeof rawDisplay === "object" &&
+        "wechat_draft_result" in rawDisplay
+      ) {
+        displays[m.tool_call_id] = {
+          wechat_draft_result: rawDisplay.wechat_draft_result,
+        };
+      }
     }
   }
   for (const m of messages || []) {
@@ -53,6 +103,7 @@ export function itemsFromMessages(messages: ConversationMessage[]): Item[] {
         }
         const preview = results[tc.id];
         const hidden = hiddenCounts[tc.id];
+        const display = displays[tc.id];
         items.push({
           kind: "tool",
           id: tc.id,
@@ -61,6 +112,7 @@ export function itemsFromMessages(messages: ConversationMessage[]): Item[] {
           status: "ok",
           preview,
           ...(hidden ? { hidden } : {}),
+          ...(display ? { display } : {}),
         });
       }
     } else if (m.role === "notice") {
@@ -69,10 +121,10 @@ export function itemsFromMessages(messages: ConversationMessage[]): Item[] {
       // the Transcript only offers the button when it's the transcript tail.
       items.push(
         m.kind === "interrupted"
-          ? { kind: "notice", tone: "warn", text: "Interrupted." }
+          ? { kind: "notice", tone: "warn", text: "已中断。" }
           : m.kind === "model_switch"
-            ? { kind: "notice", tone: "info", text: m.text || "Model switched" }
-            : { kind: "notice", tone: "warn", text: "Error: " + (m.text || "unknown"), retriable: true },
+            ? { kind: "notice", tone: "info", text: replayedModelChangeNotice(m.text) }
+            : { kind: "notice", tone: "warn", text: "错误：" + (m.text || "未知错误"), retriable: true },
       );
     }
     // system messages are omitted; tool-result messages are folded into the tool row above

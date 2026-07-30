@@ -149,3 +149,10 @@ def test_auto_mode_allows_but_path_scopes(tmp_path):
     )
     assert ok.allowed
     assert not escape.allowed
+
+
+
+
+
+
+

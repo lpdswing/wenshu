@@ -16,13 +16,20 @@ export function shortArgs(args: any): string {
 
 // Human verbs kept for the §25 grant lines (the card title now comes from humanize.ts).
 const TOOL_VERBS: Record<string, string> = {
-  write_file: "Write a file",
-  replace_in_file: "Edit a file",
-  apply_patch: "Apply a patch",
-  apply_unified_diff: "Apply a patch",
-  run_shell: "Run a command",
-  send_message: "Send a message",
-  send_file: "Send a file",
+  write_file: "写入文件",
+  replace_in_file: "编辑文件",
+  apply_patch: "应用补丁",
+  apply_unified_diff: "应用补丁",
+  run_shell: "运行命令",
+  send_message: "发送消息",
+  send_file: "发送文件",
+};
+const DECISION_LABELS: Record<ApprovalDecision, string> = {
+  once: "批准一次",
+  deny: "已拒绝",
+  always_tool: "本次会话始终允许",
+  always_command: "始终允许此命令",
+  always_task: "此自动化始终允许",
 };
 
 // §35: routine workspace writes render as a compact ROW; everything else is a full card.
@@ -65,14 +72,20 @@ export function scopeNote(
   args: any,
   category?: string,
 ): { text: string; external: boolean } {
-  if (category === "connector") return { text: "acts on a connected service", external: true };
+  if (name === "generate_article_assets") {
+    return { text: "将调用外部图片生成服务", external: true };
+  }
+  if (name === "create_wechat_draft") {
+    return { text: "将保存到微信公众号草稿箱", external: true };
+  }
+  if (category === "connector") return { text: "将在已连接的服务上执行", external: true };
   if (EXTERNAL.has(name)) {
     const platform = String(args?.target ?? "").split(":")[0];
     const names: Record<string, string> = { slack: "Slack", telegram: "Telegram" };
-    return { text: `leaves this Mac → ${names[platform] || platform || "a connected chat"}`, external: true };
+    return { text: `将离开此 Mac → ${names[platform] || platform || "已连接的聊天"}`, external: true };
   }
   const overwrite = name === "write_file" && args?.overwrite;
-  return { text: "stays on this Mac" + (overwrite ? " · overwrites the existing file" : ""), external: false };
+  return { text: "仅在此 Mac 上执行" + (overwrite ? " · 将覆盖现有文件" : ""), external: false };
 }
 
 // The proposed content/command, straight from the tool call's ARGS — the file/action
@@ -97,10 +110,10 @@ export function PreviewBlock({ text, mono = true }: { text: string; mono?: boole
       {clipped && (
         <button className="approval-prev-more" onClick={() => setAll((v) => !v)}>
           {all
-            ? "show less"
+            ? "收起"
             : lines.length > PREVIEW_LINES
-              ? `show all ${lines.length} lines`
-              : "show the full message"}
+              ? `显示全部 ${lines.length} 行`
+              : "显示完整消息"}
         </button>
       )}
     </div>
@@ -120,6 +133,126 @@ function MessagePreview({ text, label }: { text: string; label?: string }) {
   return <PreviewBlock text={text} mono={false} />;
 }
 
+export function ImageGenerationDetails({ args }: { args: unknown }) {
+  const providerValue =
+    args && typeof args === "object" && "provider" in args ? args.provider : undefined;
+  const modelValue =
+    args && typeof args === "object" && "model" in args ? args.model : undefined;
+  const totalValue =
+    args && typeof args === "object" && "total_images" in args ? args.total_images : undefined;
+  const provider =
+    typeof providerValue === "string" && providerValue.trim()
+      ? providerValue.trim()
+      : "外部图片服务";
+  const model =
+    typeof modelValue === "string" && modelValue.trim()
+      ? modelValue.trim()
+      : "模型待确认";
+  const total =
+    typeof totalValue === "number" && Number.isInteger(totalValue) && totalValue > 0
+      ? totalValue
+      : null;
+
+  return (
+    <dl
+      className="mt-3 space-y-2 rounded-lg border border-line bg-paper px-3 py-2.5"
+      data-testid="image-generation-details"
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <dt className="text-[11px] text-faint">图片服务</dt>
+        <dd className="text-[12px] font-medium text-ink">{provider} · {model}</dd>
+      </div>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <dt className="text-[11px] text-faint">生成数量</dt>
+        <dd className="text-[12px] text-muted">
+          {total === null ? "图片数量以本次生成计划为准" : `预计生成 ${total} 张图片`}
+        </dd>
+      </div>
+    </dl>
+  );
+}
+
+export function WeChatDraftDetails({ display }: { display: unknown }) {
+  const fields =
+    display && typeof display === "object"
+      ? (display as Record<string, unknown>)
+      : {};
+  const channel =
+    typeof fields.channel === "string" && fields.channel.trim() === "微信公众号"
+      ? fields.channel.trim()
+      : "微信公众号";
+  const title =
+    typeof fields.title === "string" && fields.title.trim()
+      ? fields.title.trim()
+      : "标题待确认";
+  const digest =
+    typeof fields.digest === "string" && fields.digest.trim()
+      ? fields.digest.trim()
+      : "摘要待确认";
+  const coverPath =
+    typeof fields.cover_path === "string" && fields.cover_path.trim()
+      ? fields.cover_path.trim()
+      : "";
+  const cover = coverPath
+    ? coverPath.split(/[\\/]/).filter(Boolean).pop() || "封面待确认"
+    : "封面待确认";
+  const imageCount =
+    typeof fields.image_count === "number" &&
+    Number.isInteger(fields.image_count) &&
+    fields.image_count >= 0
+      ? fields.image_count
+      : null;
+  const theme =
+    typeof fields.theme === "string" && fields.theme.trim()
+      ? fields.theme.trim()
+      : "主题待确认";
+  const color =
+    typeof fields.color === "string" && fields.color.trim()
+      ? fields.color.trim()
+      : "";
+
+  return (
+    <div
+      className="mt-3 rounded-lg border border-line bg-paper px-3 py-2.5"
+      data-testid="wechat-draft-details"
+    >
+      <dl className="space-y-2">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <dt className="text-[11px] text-faint">公众号</dt>
+          <dd className="text-[12px] font-medium text-ink">{channel}</dd>
+        </div>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <dt className="text-[11px] text-faint">标题</dt>
+          <dd className="text-[12px] font-medium text-ink">{title}</dd>
+        </div>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <dt className="text-[11px] text-faint">摘要</dt>
+          <dd className="max-w-xl text-[12px] text-muted">{digest}</dd>
+        </div>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <dt className="text-[11px] text-faint">内容</dt>
+          <dd className="text-[12px] text-muted">封面 {cover}</dd>
+        </div>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <dt className="text-[11px] text-faint">配图</dt>
+          <dd className="text-[12px] text-muted">
+            {imageCount === null ? "正文图片数量待确认" : `正文图片 ${imageCount} 张`}
+          </dd>
+        </div>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <dt className="text-[11px] text-faint">样式</dt>
+          <dd className="text-[12px] text-muted">
+            主题 {theme}{color ? ` · 配色 ${color}` : ""}
+          </dd>
+        </div>
+      </dl>
+      <p className="mt-2.5 border-t border-line pt-2.5 text-[12px] font-medium text-warnInk">
+        只保存到草稿箱，不会正式发布
+      </p>
+    </div>
+  );
+}
+
 function Buttons({
   item,
   onApprove,
@@ -132,7 +265,11 @@ function Buttons({
   primaryLabel: string;
 }) {
   const connector = item.category === "connector";
-  const offerStanding = !!(runTask && item.standingTarget);
+  const oneShotOnly =
+    item.onceOnly ||
+    item.name === "generate_article_assets" ||
+    item.name === "create_wechat_draft";
+  const offerStanding = !oneShotOnly && !!(runTask && item.standingTarget);
   return (
     <div className="approval-btns">
       <button className="btn approval-primary" onClick={() => onApprove("once")}>
@@ -141,10 +278,10 @@ function Buttons({
       {offerStanding && (
         <button
           className="btn"
-          title={`Always allow ${item.name} → ${item.standingTarget} for “${runTask?.title || "this automation"}” — revoke any time on its Automations page`}
+          title={`始终允许 ${item.name} → ${item.standingTarget} 用于“${runTask?.title || "此自动化"}”；可随时在自动化页面撤销`}
           onClick={() => onApprove("always_task")}
         >
-          Allow every time
+          此自动化始终允许
         </button>
       )}
       {/* In a run context the task-persistent grant replaces the session-scoped one —
@@ -152,23 +289,23 @@ function Buttons({
           exactly the scope distinction §25 exists to draw. Same rule for run_shell:
           the command-scoped button below is the specific (safer) grant, so the
           tool-wide one stays out of the card. */}
-      {!connector && !offerStanding && item.name !== "run_shell" && (
+      {!oneShotOnly && !connector && !offerStanding && item.name !== "run_shell" && (
         <button
           className="btn"
-          title={`Always allow ${TOOL_VERBS[item.name]?.toLowerCase() || item.name} for this session`}
+          title={`本次会话始终允许${TOOL_VERBS[item.name] || item.name}`}
           onClick={() => onApprove("always_tool")}
         >
-          Always allow
+          本次会话始终允许
         </button>
       )}
       {item.name === "run_shell" && (
         <button className="btn" onClick={() => onApprove("always_command")}>
-          Always allow this command
+          始终允许此命令
         </button>
       )}
       <span className="spacer" />
       <button className="btn quiet-deny" onClick={() => onApprove("deny")}>
-        Deny
+        拒绝
       </button>
     </div>
   );
@@ -190,6 +327,8 @@ export function ApprovalCard({
   const [peek, setPeek] = useState(false);
   const title = humanizeApprovalTitle(item.name, item.args);
   const scope = scopeNote(item.name, item.args, item.category);
+  const imageGeneration = item.name === "generate_article_assets";
+  const wechatDraftCreation = item.name === "create_wechat_draft";
   const grants = item.name === "create_scheduled_task" ? permissionLines(item.args) : [];
   // "requires approval" is the engine's default boilerplate — only surface a real reason.
   const reason = item.reason && item.reason !== "requires approval" ? item.reason : "";
@@ -206,11 +345,11 @@ export function ApprovalCard({
           <TitleText line={title} />
           {content && (
             <button className="approval-peek" onClick={() => setPeek((v) => !v)}>
-              preview {peek ? "▴" : "▾"}
+              预览 {peek ? "▴" : "▾"}
             </button>
           )}
           <span className="spacer" />
-          <Buttons item={item} onApprove={onApprove} runTask={runTask} primaryLabel="Allow" />
+          <Buttons item={item} onApprove={onApprove} runTask={runTask} primaryLabel="批准" />
         </div>
         {peek && content && <PreviewBlock text={content} />}
         {reason && <div className="approval-reason">{reason}</div>}
@@ -222,13 +361,20 @@ export function ApprovalCard({
     <div className={"approval" + (scope.external ? " approval-external" : "") + dock}>
       <div className="approval-top">
         <div className="approval-heading">
-          <span className="approval-ico" title={`Tool: ${item.name}`}>
+          <span className="approval-ico" title={`工具：${item.name}`}>
             <Icon name="shield" size={15} />
           </span>
           <TitleText line={title} />
         </div>
         <span className={"approval-scope" + (scope.external ? " out" : "")}>{scope.text}</span>
       </div>
+
+      {imageGeneration && (
+        <ImageGenerationDetails args={item.args} />
+      )}
+      {wechatDraftCreation && (
+        <WeChatDraftDetails display={item.args} />
+      )}
 
       {/* Tool-shaped previews — the proposal, not an args dump. */}
       {item.name === "run_shell" && item.args?.command && (
@@ -241,11 +387,11 @@ export function ApprovalCard({
             <span className="ico">
               <Icon name="file" size={13} />
             </span>
-            {String(item.args?.path ?? "").split("/").pop() || "file"}
-            {item.args?.as_screenshot ? " · as a PNG screenshot" : ""}
+            {String(item.args?.path ?? "").split("/").pop() || "文件"}
+            {item.args?.as_screenshot ? " · 以 PNG 截图发送" : ""}
           </span>
           {item.args?.comment && (
-            <MessagePreview text={String(item.args.comment)} label="With the message" />
+            <MessagePreview text={String(item.args.comment)} label="附带消息" />
           )}
         </>
       )}
@@ -263,7 +409,7 @@ export function ApprovalCard({
               <span className="grant-line">
                 {TOOL_VERBS[g.tool] || g.tool} <code className="approval-tool">{g.target}</code>
                 <span className="grant-note">
-                  {g.access === "write" ? " — always allowed once you approve" : " — read-only"}
+                  {g.access === "write" ? " — 批准后将始终允许" : " — 只读"}
                 </span>
               </span>
             </div>
@@ -271,16 +417,29 @@ export function ApprovalCard({
         </div>
       )}
       {/* Long-tail tools: no bespoke preview — fall back to the compact args line. */}
-      {!FILE_WRITES.has(item.name) &&
+      {!imageGeneration &&
+        !wechatDraftCreation &&
+        !FILE_WRITES.has(item.name) &&
         !["run_shell", "send_message", "send_file"].includes(item.name) &&
         !grants.length &&
         shortArgs(item.args) && <div className="approval-rest">{shortArgs(item.args)}</div>}
       {reason && <div className="approval-reason">{reason}</div>}
 
       {item.resolved ? (
-        <div className="resolved">Approved: {item.resolved.replace("_", " ")}</div>
+        <div className="resolved">已处理：{DECISION_LABELS[item.resolved]}</div>
       ) : (
-        <Buttons item={item} onApprove={onApprove} runTask={runTask} primaryLabel="Allow once" />
+        <Buttons
+          item={item}
+          onApprove={onApprove}
+          runTask={runTask}
+          primaryLabel={
+            imageGeneration
+              ? "批准并生成"
+              : wechatDraftCreation
+                ? "批准并保存草稿"
+                : "批准一次"
+          }
+        />
       )}
     </div>
   );

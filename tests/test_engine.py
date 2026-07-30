@@ -7,9 +7,10 @@ import threading
 import time
 
 import aisuite as ai
+import pytest
 from coworker.engine import ApprovalOutcome, PermissionRequest, TurnEngine
 from coworker.events import EventType
-from coworker.permissions import PermissionEngine
+from coworker.permissions import Mode, PermissionEngine
 from coworker.providers import (
     AssistantTurn,
     ModelCapabilities,
@@ -45,6 +46,11 @@ class ScriptedProvider(ProviderClient):
 
     def capabilities(self, model):
         return ModelCapabilities()
+
+
+class StubImageProvider:
+    async def generate(self, request):
+        raise AssertionError(f"image provider must not run during registration: {request}")
 
 
 def _engine(tmp_path, turns, *, approver=None, loop=False, max_iterations=12):
@@ -114,21 +120,346 @@ def test_tool_turn_order_and_execution(tmp_path):
     )
 
 
-def test_write_requires_approval_then_approved(tmp_path):
-    async def approve_once(_req: PermissionRequest):
-        return ApprovalOutcome.ONCE
+def test_async_tool_is_awaited_before_recording_result(tmp_path):
+    async def async_echo(value: str) -> dict[str, str]:
+        await asyncio.sleep(0)
+        return {"echo": value}
 
     engine, _ = _engine(
         tmp_path,
+        [_tool_turn("async_echo", {"value": "awaited"}), _text_turn("done")],
+    )
+    engine.registry.register(
+        async_echo,
+        metadata=ai.ToolMetadata(
+            name="async_echo",
+            category="test",
+            risk_level="low",
+            capabilities=["test"],
+            requires_approval=False,
+        ),
+    )
+
+    events = _collect(engine, "run async tool")
+
+    finished = next(e for e in events if e.type == EventType.TOOL_FINISHED)
+    assert finished.data["status"] == "ok"
+    assert any(
+        message.get("role") == "tool" and "awaited" in message["content"]
+        for message in engine.messages
+    )
+    assert all("coroutine object" not in message["content"] for message in engine.messages)
+
+
+def test_write_requires_approval_then_approved(tmp_path):
+    requests: list[PermissionRequest] = []
+
+    async def approve_once(request: PermissionRequest):
+        requests.append(request)
+        return ApprovalOutcome.ONCE
+
+    arguments = {"path": "new.py", "content": "print(1)\n"}
+    engine, _ = _engine(
+        tmp_path,
         [
-            _tool_turn("write_file", {"path": "new.py", "content": "print(1)\n"}),
+            _tool_turn("write_file", arguments),
             _text_turn("wrote new.py"),
         ],
         approver=approve_once,
     )
     events = _collect(engine, "create new.py")
-    assert EventType.PERMISSION_REQUIRED in _types(events)
+    permission = next(
+        event for event in events if event.type is EventType.PERMISSION_REQUIRED
+    )
+    assert permission.data["arguments"] == arguments
+    assert requests[0].arguments == arguments
+    assert requests[0].display_arguments is None
     assert (tmp_path / "new.py").read_text() == "print(1)\n"
+
+
+def test_approval_arguments_are_display_only(tmp_path):
+    original_arguments = {
+        "article_path": "article.md",
+        "reviewed_hash": "a" * 64,
+        "cover_request": {"prompt": "封面"},
+        "illustration_plan": [
+            {
+                "heading": "第一节",
+                "prompt": "配图",
+                "output_path": "section.png",
+            }
+        ],
+    }
+    display_fields = {
+        "article_title": "文枢审批契约",
+        "provider": "OpenAI",
+        "model": "gpt-image-2",
+        "total_images": 2,
+    }
+    executed: list[dict[str, object]] = []
+    summarized: list[dict[str, object]] = []
+    requests: list[PermissionRequest] = []
+
+    def generate_article_assets(
+        article_path: str,
+        reviewed_hash: str,
+        cover_request: dict,
+        illustration_plan: list,
+    ) -> dict[str, bool]:
+        executed.append(
+            {
+                "article_path": article_path,
+                "reviewed_hash": reviewed_hash,
+                "cover_request": cover_request,
+                "illustration_plan": illustration_plan,
+            }
+        )
+        return {"ok": True}
+
+    def approval_arguments(arguments):
+        summarized.append(dict(arguments))
+        return display_fields
+
+    async def approve_once(request: PermissionRequest):
+        requests.append(request)
+        return ApprovalOutcome.ONCE
+
+    registry = ToolRegistry()
+    spec = registry.register(
+        generate_article_assets,
+        metadata=ai.ToolMetadata(
+            name="generate_article_assets",
+            category="content-generation",
+            risk_level="medium",
+            capabilities=["article-image-generation"],
+            requires_approval=True,
+        ),
+        approval_arguments=approval_arguments,
+    )
+    engine = TurnEngine(
+        provider=ScriptedProvider(
+            [
+                _tool_turn("generate_article_assets", original_arguments),
+                _text_turn("done"),
+            ]
+        ),
+        registry=registry,
+        permissions=PermissionEngine(workspace_root=tmp_path),
+        model="gpt-5.5",
+        approver=approve_once,
+    )
+
+    events = _collect(engine, "generate article images")
+
+    expected_display = display_fields
+    permission = next(
+        event for event in events if event.type is EventType.PERMISSION_REQUIRED
+    )
+    assert permission.data["arguments"] == expected_display
+    assert summarized == [original_arguments]
+    assert requests[0].arguments == original_arguments
+    assert requests[0].display_arguments == expected_display
+    assert "reviewed_hash" not in requests[0].display_arguments
+    assert "cover_request" not in requests[0].display_arguments
+    assert "illustration_plan" not in requests[0].display_arguments
+    assert executed == [original_arguments]
+    assert set(spec.schema["function"]["parameters"]["properties"]) == set(
+        original_arguments
+    )
+
+
+def test_one_shot_tool_rejects_persistent_approval_scope(tmp_path):
+    executed: list[str] = []
+    requests: list[PermissionRequest] = []
+
+    def paid_tool(value: str) -> str:
+        executed.append(value)
+        return value
+
+    async def approve_persistently(request: PermissionRequest):
+        requests.append(request)
+        return ApprovalOutcome.ALWAYS_TOOL
+
+    registry = ToolRegistry()
+    registry.register(
+        paid_tool,
+        metadata=ai.ToolMetadata(
+            name="paid_tool",
+            category="content-generation",
+            risk_level="medium",
+            capabilities=["paid-operation"],
+            requires_approval=True,
+        ),
+        approval_once_only=True,
+    )
+    engine = TurnEngine(
+        provider=ScriptedProvider(
+            [_tool_turn("paid_tool", {"value": "run"}), _text_turn("done")]
+        ),
+        registry=registry,
+        permissions=PermissionEngine(workspace_root=tmp_path),
+        model="gpt-5.5",
+        approver=approve_persistently,
+    )
+
+    events = _collect(engine, "run paid tool")
+
+    permission = next(
+        event for event in events if event.type is EventType.PERMISSION_REQUIRED
+    )
+    assert permission.data["approval_once_only"] is True
+    assert requests[0].approval_once_only is True
+
+    finished = next(
+        event for event in events if event.type is EventType.TOOL_FINISHED
+    )
+    assert finished.data["status"] == "denied"
+    assert finished.data["reason"] == "persistent approval is not allowed for this tool"
+    assert executed == []
+    assert "paid_tool" not in engine.permissions.session_allow_tools
+
+
+def test_one_shot_tool_requires_approval_even_in_auto_mode(tmp_path):
+    executed: list[str] = []
+    requests: list[PermissionRequest] = []
+
+    def paid_tool(value: str) -> str:
+        executed.append(value)
+        return value
+
+    async def approve_once(request: PermissionRequest):
+        requests.append(request)
+        return ApprovalOutcome.ONCE
+
+    registry = ToolRegistry()
+    registry.register(
+        paid_tool,
+        metadata=ai.ToolMetadata(
+            name="paid_tool",
+            category="content-generation",
+            risk_level="medium",
+            capabilities=["paid-operation"],
+            requires_approval=True,
+        ),
+        approval_once_only=True,
+    )
+    engine = TurnEngine(
+        provider=ScriptedProvider(
+            [_tool_turn("paid_tool", {"value": "run"}), _text_turn("done")]
+        ),
+        registry=registry,
+        permissions=PermissionEngine(workspace_root=tmp_path, mode=Mode.AUTO),
+        model="gpt-5.5",
+        approver=approve_once,
+    )
+
+    events = _collect(engine, "run paid tool")
+
+    permission = next(
+        event for event in events if event.type is EventType.PERMISSION_REQUIRED
+    )
+    assert permission.data["reason"] == "requires one-time approval"
+    assert permission.data["approval_once_only"] is True
+    assert requests[0].approval_once_only is True
+    assert executed == ["run"]
+
+
+def test_tool_result_display_sidecar_is_not_truncated_or_sent_to_provider(tmp_path):
+    display = {
+        "wechat_draft_result": {
+            "status": "unknown",
+            "title": "文枢内容流水线",
+            "error_kind": "transport",
+            "uploaded_asset_count": 3,
+            "draft_only": True,
+        }
+    }
+
+    def draft_result():
+        return {
+            "status": "unknown",
+            "payload": "x" * 600,
+            "_display": display,
+        }
+
+    registry = ToolRegistry()
+    registry.register(
+        draft_result,
+        metadata=ai.ToolMetadata(
+            name="draft_result",
+            category="connector",
+            risk_level="low",
+            capabilities=["test"],
+            requires_approval=False,
+        ),
+    )
+    engine = TurnEngine(
+        provider=ScriptedProvider(
+            [_tool_turn("draft_result", {}), _text_turn("done")]
+        ),
+        registry=registry,
+        permissions=PermissionEngine(workspace_root=tmp_path),
+        model="gpt-5.5",
+    )
+
+    events = _collect(engine, "run")
+
+    finished = next(
+        event for event in events if event.type is EventType.TOOL_FINISHED
+    )
+    assert finished.data["display"] == display
+    assert len(finished.data["result_preview"]) <= 300
+    tool_message = next(message for message in engine.messages if message["role"] == "tool")
+    assert tool_message["_display"] == display
+    assert "_display" not in tool_message["content"]
+
+
+def test_approval_arguments_failure_falls_back_without_skipping_approval(tmp_path):
+    arguments = {"value": "original"}
+    executed: list[str] = []
+    requests: list[PermissionRequest] = []
+
+    def consequential_tool(value: str) -> str:
+        executed.append(value)
+        return value
+
+    def broken_summary(_arguments):
+        raise RuntimeError("summary unavailable")
+
+    async def approve_once(request: PermissionRequest):
+        requests.append(request)
+        return ApprovalOutcome.ONCE
+
+    registry = ToolRegistry()
+    registry.register(
+        consequential_tool,
+        metadata=ai.ToolMetadata(
+            name="consequential_tool",
+            category="test",
+            risk_level="medium",
+            capabilities=["test"],
+            requires_approval=True,
+        ),
+        approval_arguments=broken_summary,
+    )
+    engine = TurnEngine(
+        provider=ScriptedProvider(
+            [_tool_turn("consequential_tool", arguments), _text_turn("done")]
+        ),
+        registry=registry,
+        permissions=PermissionEngine(workspace_root=tmp_path),
+        model="gpt-5.5",
+        approver=approve_once,
+    )
+
+    events = _collect(engine, "run it")
+
+    permission = next(
+        event for event in events if event.type is EventType.PERMISSION_REQUIRED
+    )
+    assert permission.data["arguments"] == arguments
+    assert requests[0].display_arguments is None
+    assert executed == ["original"]
 
 
 def test_denied_tool_yields_error_and_continues(tmp_path):
@@ -439,3 +770,141 @@ def test_outbound_replaces_images_for_non_vision_models(tmp_path):
     assert all(p["type"] != "image_url" for p in parts)
     assert "not viewable" in parts[-1]["text"]
     assert engine.messages[-1]["content"][1]["type"] == "image_url"  # history untouched
+
+
+
+
+
+def test_native_content_tools_are_scoped_to_wenshu_cowork(tmp_path):
+    from coworker.agent import build_engine
+    from coworker.agents import code_agent, cowork_agent
+    from coworker.secrets import SecretStore
+
+    secrets = SecretStore(tmp_path / "secrets.json")
+    cowork = build_engine(
+        agent=cowork_agent(),
+        workspace=tmp_path,
+        provider=ScriptedProvider([]),
+        secrets=secrets,
+        image_provider=StubImageProvider(),
+    )
+    code = build_engine(
+        agent=code_agent(),
+        workspace=tmp_path,
+        provider=ScriptedProvider([]),
+        secrets=secrets,
+        image_provider=StubImageProvider(),
+    )
+    content_tools = {"prepare_article_review", "generate_article_assets"}
+    try:
+        assert content_tools <= set(cowork.registry.names())
+        assert content_tools.isdisjoint(code.registry.names())
+        generation = cowork.registry.get("generate_article_assets")
+        assert generation is not None
+        assert generation.approval_arguments is not None
+        assert generation.approval_once_only is True
+    finally:
+        cowork.executor.close()
+        code.executor.close()
+
+
+def test_content_approval_summary_uses_safe_secret_store_description(tmp_path):
+    from coworker.agent import build_engine
+    from coworker.agents import cowork_agent
+    from coworker.secrets import SecretStore
+
+    secrets = SecretStore(tmp_path / "secrets.json")
+    secrets.put(
+        "provider:openai",
+        {
+            "api_key": "sk-never-display",
+            "base_url": "https://private-proxy.example.test/v1",
+            "image_model": "gpt-image-2",
+        },
+    )
+    article = tmp_path / "article.md"
+    article.write_text("---\ntitle: 审批摘要\n---\n正文\n", encoding="utf-8")
+    built: list[bool] = []
+
+    def provider_factory():
+        built.append(True)
+        return StubImageProvider()
+
+    engine = build_engine(
+        agent=cowork_agent(),
+        workspace=tmp_path,
+        provider=ScriptedProvider([]),
+        secrets=secrets,
+        image_provider=provider_factory,
+    )
+    try:
+        spec = engine.registry.get("generate_article_assets")
+        assert spec is not None and spec.approval_arguments is not None
+        arguments = {
+            "article_path": str(article),
+            "reviewed_hash": "a" * 64,
+            "cover_request": {"prompt": "封面"},
+            "illustration_plan": [],
+        }
+
+        summary = spec.approval_arguments(arguments)
+
+        assert summary == {
+            "article_title": "审批摘要",
+            "provider": "OpenAI",
+            "model": "gpt-image-2",
+            "total_images": 1,
+        }
+        assert built == []
+        assert "sk-never-display" not in repr(summary)
+        assert "private-proxy.example.test" not in repr(summary)
+    finally:
+        engine.executor.close()
+
+
+def test_content_tools_observe_engine_root_revocation(tmp_path):
+    from coworker.agent import build_engine
+    from coworker.agents import cowork_agent
+    from coworker.content.paths import ContentPathError
+    from coworker.roots import RootDir
+    from coworker.secrets import SecretStore
+
+    primary = tmp_path / "primary"
+    extra = tmp_path / "extra"
+    primary.mkdir()
+    extra.mkdir()
+    article = extra / "article.md"
+    article.write_text("---\ntitle: 动态目录\n---\n正文\n", encoding="utf-8")
+    engine = build_engine(
+        agent=cowork_agent(),
+        workspace=primary,
+        roots=[
+            RootDir(path=primary, writable=True),
+            RootDir(path=extra, writable=True),
+        ],
+        provider=ScriptedProvider([]),
+        secrets=SecretStore(tmp_path / "secrets.json"),
+        image_provider=StubImageProvider(),
+    )
+    try:
+        engine.roots[:] = [
+            root for root in engine.roots if root.path != extra.resolve()
+        ]
+        with pytest.raises(ContentPathError):
+            engine.registry.execute(
+                "prepare_article_review",
+                {"article_path": str(article)},
+            )
+        generate = engine.registry.get("generate_article_assets")
+        assert generate is not None and generate.approval_arguments is not None
+        with pytest.raises(ContentPathError):
+            generate.approval_arguments(
+                {
+                    "article_path": str(article),
+                    "reviewed_hash": "a" * 64,
+                    "cover_request": {"prompt": "封面"},
+                    "illustration_plan": [],
+                }
+            )
+    finally:
+        engine.executor.close()

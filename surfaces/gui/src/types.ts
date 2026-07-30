@@ -84,7 +84,7 @@ export type Item =
   // `hidden` = results the user's privacy filters removed before the agent saw them
   // (from the tool message's `_display` sidecar; the agent-visible content has no trace).
   // `standingRule` = the task-scoped rule that auto-allowed this call ("tool → target").
-  | { kind: "tool"; id: string; name: string; args: any; status: string; preview?: string; hidden?: number; standingRule?: string }
+  | { kind: "tool"; id: string; name: string; args: unknown; status: string; preview?: string; display?: Record<string, unknown>; hidden?: number; standingRule?: string }
   | {
       kind: "approval";
       name: string;
@@ -94,6 +94,8 @@ export type Item =
       // The exact target a standing rule could pin (server-computed) — with a run
       // context, the card offers "Allow every time" (§25).
       standingTarget?: string;
+      // Host-declared invariant: this call must never offer a persistent grant.
+      onceOnly?: boolean;
       resolved?: ApprovalDecision;
     }
   | {

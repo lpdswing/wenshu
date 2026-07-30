@@ -59,18 +59,22 @@ const BTN_BORDERED =
   "text-[12.5px] px-3 py-2 rounded-lg border border-line bg-paper hover:border-lineStrong shrink-0";
 
 const SET_TABS: { key: SetTab; label: string; icon: "sliders" | "code" | "mic" | "sparkle" }[] = [
-  { key: "appearance", label: "General", icon: "sliders" },
-  { key: "models", label: "Models", icon: "code" },
-  { key: "voice", label: "Voice input", icon: "mic" },
-  { key: "personas", label: "Personas", icon: "sparkle" },
+  { key: "appearance", label: "通用", icon: "sliders" },
+  { key: "models", label: "模型", icon: "code" },
+  { key: "voice", label: "语音输入", icon: "mic" },
+  { key: "personas", label: "角色", icon: "sparkle" },
 ];
 
 export function SettingsView({
   initialTab,
   onOpenPersona,
+  galleryEnabled,
+  updaterEnabled,
 }: {
   initialTab?: SetTab;
   onOpenPersona?: (id: string) => void;
+  galleryEnabled: boolean;
+  updaterEnabled: boolean;
 }) {
   // Personas is flag-gated (hidden for launch) — filter the tab AND coerce a stale
   // deep-link to it (openSettings("personas") callers) so the page never opens on a
@@ -84,7 +88,7 @@ export function SettingsView({
     <main className="flex-1 min-w-0 flex bg-paper">
       <nav className="page-subnav w-[208px] shrink-0 border-r border-line bg-panel/40 px-3 py-4">
         <div className="px-2 text-[13.5px] font-semibold mb-3 flex items-center gap-2">
-          <Icon name="gear" size={16} /> Settings
+          <Icon name="gear" size={16} /> 设置
         </div>
         {tabs.map((t) => {
           const active = tab === t.key;
@@ -106,12 +110,12 @@ export function SettingsView({
       <div className="flex-1 min-w-0 overflow-y-auto hairline-scroll">
         <div className="max-w-3xl mx-auto px-7 py-6">
           {tab === "appearance" ? (
-            <AppearanceSection />
+            <AppearanceSection updaterEnabled={updaterEnabled} />
           ) : tab === "models" ? (
             <section>
               <PanelHead
-                title="Models"
-                sub="Providers and the models offered in the composer's picker. Keys are stored only on this computer."
+                title="模型"
+                sub="管理服务商以及输入框中可选的模型。密钥只保存在这台电脑上。"
               />
               <ModelsTab />
               {/* Token savings is model-spend behavior, so it lives here (UX-021),
@@ -123,7 +127,10 @@ export function SettingsView({
           ) : tab === "voice" ? (
             <VoiceInputSection />
           ) : (
-            <PersonasSection onOpenPersona={onOpenPersona} />
+            <PersonasSection
+              galleryEnabled={galleryEnabled}
+              onOpenPersona={onOpenPersona}
+            />
           )}
         </div>
       </div>
@@ -133,7 +140,7 @@ export function SettingsView({
 
 // -- Voice input: deliberate model provisioning + compatibility + microphone test (§37) --------
 const voiceError = (error: unknown) =>
-  error instanceof Error ? error.message : typeof error === "string" ? error : "Voice Input could not complete that action.";
+  error instanceof Error ? error.message : typeof error === "string" ? error : "语音输入无法完成此操作。";
 
 const formatBytes = (bytes: number) => {
   if (!bytes) return "0 MiB";
@@ -215,7 +222,7 @@ function VoiceInputSection() {
   };
 
   const remove = async () => {
-    if (!window.confirm("Delete the local Whisper model and disable Voice Input?")) return;
+    if (!window.confirm("删除本地 Whisper 模型并停用语音输入？")) return;
     setError(null);
     try {
       publish(await deleteDictationModel());
@@ -234,7 +241,7 @@ function VoiceInputSection() {
         setPhase("transcribing");
         const transcript = (await stopDictation()).trim();
         setTestTranscript(transcript);
-        if (!transcript) throw new Error("No speech was detected. Try again and speak for a little longer.");
+        if (!transcript) throw new Error("未检测到语音，请再试一次并稍微延长说话时间。");
         publish(await markDictationTestPassed());
       } else {
         setTestTranscript("");
@@ -258,37 +265,37 @@ function VoiceInputSection() {
   return (
     <section>
       <PanelHead
-        title="Voice input"
-        sub="Speak naturally in the composer. Recordings and transcripts stay on this device."
+        title="语音输入"
+        sub="在输入框中自然说话。录音和转写内容都只保留在此设备上。"
       />
 
       {!desktop ? (
-        <div className={CARD + " p-4 text-[13px] text-muted"}>Voice Input setup is available in the OpenWorker desktop app.</div>
+        <div className={CARD + " p-4 text-[13px] text-muted"}>请在文枢桌面应用中设置语音输入。</div>
       ) : (
         <div className="space-y-4">
           <div className="rounded-xl border border-green-200 bg-green-50/70 px-4 py-3 text-[12.5px] text-green-800">
-            <span className="font-medium">Private by design.</span> Audio is held in memory only while you record and is transcribed locally.
+            <span className="font-medium">隐私优先。</span> 音频只在录音期间保存在内存中，并完全在本地转写。
           </div>
 
           <div className={CARD}>
             <div className="p-4 flex items-start gap-3">
               <Icon name="code" size={18} className="text-accent mt-0.5" />
               <div className="min-w-0 flex-1">
-                <div className="text-[13.5px] font-medium">This device</div>
-                <div className="text-[12px] text-muted mt-1">{status?.device_summary || "Checking compatibility…"}</div>
+                <div className="text-[13.5px] font-medium">此设备</div>
+                <div className="text-[12px] text-muted mt-1">{status?.device_summary || "正在检查兼容性…"}</div>
                 {status?.compatibility_reason && <div className="text-[12px] text-red-600 mt-1.5">{status.compatibility_reason}</div>}
               </div>
               {status && (
                 <span className={"text-[11.5px] px-2 py-1 rounded-full " + (status.supported ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600")}>
-                  {status.supported ? "● Compatible" : "Unsupported"}
+                  {status.supported ? "● 兼容" : "不支持"}
                 </span>
               )}
             </div>
             <div className="border-t border-line bg-paper/50 px-4 py-3 grid grid-cols-2 gap-3 text-[12px] text-muted">
               <div><span className="block text-ink font-medium">Mac</span>macOS 12+ · Apple Silicon M1+</div>
               <div><span className="block text-ink font-medium">Windows</span>Windows 10 22H2/11 · x64</div>
-              <div><span className="block text-ink font-medium">Memory</span>8 GB recommended</div>
-              <div><span className="block text-ink font-medium">Processor</span>4 CPU cores recommended</div>
+              <div><span className="block text-ink font-medium">内存</span>建议 8 GB</div>
+              <div><span className="block text-ink font-medium">处理器</span>建议 4 个 CPU 核心</div>
             </div>
           </div>
 
@@ -298,27 +305,27 @@ function VoiceInputSection() {
               <div className="min-w-0 flex-1">
                 <div className="text-[13.5px] font-medium">Whisper Base · English</div>
                 <div className="text-[12px] text-muted mt-0.5">
-                  {status?.model_verified ? `Installed and verified · ${formatBytes(status.model_bytes)}` : `Local voice model · ${formatBytes(status?.model_bytes || 147_964_211)}`}
+                  {status?.model_verified ? `已安装并验证 · ${formatBytes(status.model_bytes)}` : `本地语音模型 · ${formatBytes(status?.model_bytes || 147_964_211)}`}
                 </div>
               </div>
               {status?.model_verified ? (
                 <>
-                  <span className="text-[11.5px] px-2 py-1 rounded-full bg-green-50 text-green-700">Verified</span>
-                  <button className={BTN_BORDERED} onClick={() => void repair()}>Repair</button>
-                  <button className="text-[12px] text-red-600 px-2 py-2" onClick={() => void remove()}>Delete</button>
+                  <span className="text-[11.5px] px-2 py-1 rounded-full bg-green-50 text-green-700">已验证</span>
+                  <button className={BTN_BORDERED} onClick={() => void repair()}>修复</button>
+                  <button className="text-[12px] text-red-600 px-2 py-2" onClick={() => void remove()}>删除</button>
                 </>
               ) : downloading ? (
-                <button className={BTN_BORDERED} onClick={() => void cancelDownload()}>Cancel</button>
+                <button className={BTN_BORDERED} onClick={() => void cancelDownload()}>取消</button>
               ) : phase === "verifying" ? (
-                <span className="text-[12px] text-muted">Verifying…</span>
+                <span className="text-[12px] text-muted">正在验证…</span>
               ) : (
-                <button className={BTN_ACCENT} disabled={!status?.supported} onClick={() => void download()}>Download model</button>
+                <button className={BTN_ACCENT} disabled={!status?.supported} onClick={() => void download()}>下载模型</button>
               )}
             </div>
             {downloading && (
               <div className="border-t border-line px-4 py-3">
                 <div className="h-1.5 rounded-full bg-line overflow-hidden"><div className="h-full bg-accent transition-all" style={{ width: `${progressPercent}%` }} /></div>
-                <div className="mt-1.5 text-[11.5px] text-muted flex"><span>{formatBytes(progress?.downloaded_bytes || 0)} of {formatBytes(progressTotal)}</span><span className="ml-auto">{progressPercent}%</span></div>
+                <div className="mt-1.5 text-[11.5px] text-muted flex"><span>{formatBytes(progress?.downloaded_bytes || 0)} / {formatBytes(progressTotal)}</span><span className="ml-auto">{progressPercent}%</span></div>
               </div>
             )}
           </div>
@@ -327,17 +334,17 @@ function VoiceInputSection() {
             <div className="p-4 flex items-center gap-3">
               <Icon name="mic" size={18} className={ready ? "text-green-600" : "text-muted"} />
               <div className="min-w-0 flex-1">
-                <div className="text-[13.5px] font-medium">Microphone test</div>
+                <div className="text-[13.5px] font-medium">麦克风测试</div>
                 <div className="text-[12px] text-muted mt-0.5">
-                  {ready ? "Your microphone and local transcription engine are working." : "Record a short phrase to enable the composer microphone."}
+                  {ready ? "麦克风和本地转写引擎工作正常。" : "录制一小段语音，以启用输入框中的麦克风。"}
                 </div>
               </div>
-              {ready && <span className="text-[11.5px] px-2 py-1 rounded-full bg-green-50 text-green-700">● Ready</span>}
+              {ready && <span className="text-[11.5px] px-2 py-1 rounded-full bg-green-50 text-green-700">● 就绪</span>}
               <button className={BTN_BORDERED} disabled={!status?.supported || !status?.model_verified || phase === "transcribing"} onClick={() => void toggleTest()}>
-                {status?.recording ? "Stop and check" : phase === "transcribing" ? "Transcribing…" : ready ? "Test again" : "Test microphone"}
+                {status?.recording ? "停止并检查" : phase === "transcribing" ? "正在转写…" : ready ? "再次测试" : "测试麦克风"}
               </button>
             </div>
-            {status?.recording && <div className="border-t border-line px-4 py-3 text-[12px] text-accent" role="status">● Listening… speak a short phrase, then stop.</div>}
+            {status?.recording && <div className="border-t border-line px-4 py-3 text-[12px] text-accent" role="status">● 正在聆听…请说一小段话，然后停止。</div>}
             {testTranscript && <div className="border-t border-line bg-paper/50 px-4 py-3 text-[13px]">“{testTranscript}”</div>}
           </div>
 
@@ -351,7 +358,13 @@ function VoiceInputSection() {
 // -- Personas: installed/enabled/delete management, the dir/Git importer, and the
 // entry point to the Persona Gallery (a screen-sized modal — installs finish back
 // here, disabled pending consent; a gallery install re-mounts the list in place).
-function PersonasSection({ onOpenPersona }: { onOpenPersona?: (id: string) => void }) {
+function PersonasSection({
+  galleryEnabled,
+  onOpenPersona,
+}: {
+  galleryEnabled: boolean;
+  onOpenPersona?: (id: string) => void;
+}) {
   const [galleryBump, setGalleryBump] = useState(0);
   const [galleryOpen, setGalleryOpen] = useState(false);
 
@@ -362,32 +375,36 @@ function PersonasSection({ onOpenPersona }: { onOpenPersona?: (id: string) => vo
         sub="Which coworkers are enabled and shown in the picker, plus installing new persona bundles."
       />
       <PersonasTab key={galleryBump} onOpenPersona={onOpenPersona} />
-      <button
-        className="mt-6 w-full rounded-xl2 border border-line bg-panel px-4 py-3.5 flex items-center gap-3 text-left hover:border-lineStrong"
-        data-testid="gallery-link"
-        onClick={() => setGalleryOpen(true)}
-      >
-        <Icon name="sparkle" size={16} className="text-accent shrink-0" />
-        <span className="min-w-0 flex-1">
-          <span className="block text-[13.5px] font-medium">Browse the Persona Gallery</span>
-          <span className="block text-[12px] text-muted">
-            Curated coworkers from the OpenWorker team — see what each can do before installing.
-          </span>
-        </span>
-        <span className="text-[12.5px] text-accent shrink-0">Open →</span>
-      </button>
-      {galleryOpen && (
-        <GalleryModal
-          onClose={() => setGalleryOpen(false)}
-          onInstalled={() => setGalleryBump((b) => b + 1)}
-        />
+      {galleryEnabled && (
+        <>
+          <button
+            className="mt-6 w-full rounded-xl2 border border-line bg-panel px-4 py-3.5 flex items-center gap-3 text-left hover:border-lineStrong"
+            data-testid="gallery-link"
+            onClick={() => setGalleryOpen(true)}
+          >
+            <Icon name="sparkle" size={16} className="text-accent shrink-0" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-[13.5px] font-medium">Browse the Persona Gallery</span>
+              <span className="block text-[12px] text-muted">
+                Curated coworkers from the OpenWorker team — see what each can do before installing.
+              </span>
+            </span>
+            <span className="text-[12.5px] text-accent shrink-0">Open →</span>
+          </button>
+          {galleryOpen && (
+            <GalleryModal
+              onClose={() => setGalleryOpen(false)}
+              onInstalled={() => setGalleryBump((b) => b + 1)}
+            />
+          )}
+        </>
       )}
     </section>
   );
 }
 
 // -- Appearance + app behaviour ------------------------------------------------
-function AppearanceSection() {
+function AppearanceSection({ updaterEnabled }: { updaterEnabled: boolean }) {
   const [theme, setTheme] = useThemePref();
   const [autostart, setAuto] = useState(false);
   const [keepAwake, setKeep] = useState(false);
@@ -409,18 +426,18 @@ function AppearanceSection() {
 
   return (
     <section>
-      <PanelHead title="General" sub="How OpenWorker looks and behaves on this machine." />
+      <PanelHead title="通用" sub="设置文枢在此设备上的外观和行为。" />
 
       <div className={CARD + " p-4 mb-4"}>
-        <div className={FIELD_LABEL}>Theme</div>
-        <div className="seg mt-2.5" role="radiogroup" aria-label="Appearance">
+        <div className={FIELD_LABEL}>主题</div>
+        <div className="seg mt-2.5" role="radiogroup" aria-label="外观">
           {(["light", "dark", "auto"] as const).map((p) => (
             <button key={p} className={p === theme ? "active" : ""} onClick={() => setTheme(p)}>
-              {p === "light" ? "Light" : p === "dark" ? "Dark" : "Auto"}
+              {p === "light" ? "浅色" : p === "dark" ? "深色" : "自动"}
             </button>
           ))}
         </div>
-        <div className={FIELD_HELP}>Auto follows your Mac&rsquo;s appearance.</div>
+        <div className={FIELD_HELP}>自动模式会跟随 Mac 的外观设置。</div>
       </div>
 
       <SidebarCard />
@@ -431,36 +448,37 @@ function AppearanceSection() {
 
       {desktop && (
         <div className={CARD + " p-4"}>
-          <div className={FIELD_LABEL + " mb-2.5"}>Always-on</div>
+          <div className={FIELD_LABEL + " mb-2.5"}>常驻运行</div>
           <label className="flex items-start gap-3 py-2">
             <input type="checkbox" className="mt-0.5" checked={autostart} onChange={(e) => toggleAuto(e.target.checked)} />
             <span>
-              <span className="block text-[13px] text-ink">Open at login</span>
-              <span className="block text-[12px] text-muted">Launch OpenWorker automatically when you sign in.</span>
+              <span className="block text-[13px] text-ink">登录时打开</span>
+              <span className="block text-[12px] text-muted">登录系统后自动启动文枢。</span>
             </span>
           </label>
           <label className="flex items-start gap-3 py-2">
             <input type="checkbox" className="mt-0.5" checked={keepAwake} onChange={(e) => toggleKeep(e.target.checked)} />
             <span>
-              <span className="block text-[13px] text-ink">Keep this system awake</span>
-              <span className="block text-[12px] text-muted">Prevent idle sleep so scheduled tasks fire on time.</span>
+              <span className="block text-[13px] text-ink">阻止系统休眠</span>
+              <span className="block text-[12px] text-muted">保持系统唤醒，确保自动化按时执行。</span>
             </span>
           </label>
         </div>
       )}
 
-      {/* One card for the app-lifecycle actions (UX-021): the onboarding replay (§24 —
-          every build, the browser dev shell runs the same first-run flow) and, on
-          desktop, the manual update check (launch also checks automatically). */}
+      {/* Product-gated lifecycle actions: updater-disabled builds expose setup only and
+          never invoke a native updater that has no endpoint or public key configured. */}
       <div className={CARD + " p-4 mt-4"}>
-        <div className={FIELD_LABEL + " mb-2"}>Setup &amp; updates</div>
+        <div className={FIELD_LABEL + " mb-2"}>
+          {updaterEnabled ? "设置与更新" : "首次设置"}
+        </div>
         <div className="flex items-center gap-2">
           <button className={BTN_BORDERED} onClick={runSetupAgain}>
-            Run setup again
+            重新运行设置
           </button>
-          {desktop && <UpdateInline />}
+          {desktop && updaterEnabled && <UpdateInline />}
         </div>
-        <div className={FIELD_HELP}>Replays the first-run setup: model, first automation, tips.</div>
+        <div className={FIELD_HELP}>重新打开首次设置向导：连接模型、了解自动化与使用提示。</div>
       </div>
     </section>
   );
@@ -479,21 +497,21 @@ function TrustedWorkspacesCard() {
   }, []);
 
   const revoke = async (path: string) => {
-    if (!window.confirm(`Revoke command trust for ${path}?`)) return;
+    if (!window.confirm(`撤销 ${path} 的命令信任？`)) return;
     await setWorkspaceTrusted(path, false);
     refresh();
   };
 
   return (
     <div className={CARD + " p-4 mb-4"} data-testid="trusted-workspaces-card">
-      <div className={FIELD_LABEL}>Trusted workspaces</div>
+      <div className={FIELD_LABEL}>可信工作区</div>
       <div className={FIELD_HELP}>
-        Trusted projects may manage their command allowances in .coworker/config.toml.
+        可信项目可以在 .coworker/config.toml 中管理允许执行的命令。
       </div>
       {workspaces === null ? (
-        <div className="text-[12px] text-muted mt-3">Loading…</div>
+        <div className="text-[12px] text-muted mt-3">正在加载…</div>
       ) : workspaces.length === 0 ? (
-        <div className="text-[12px] text-muted mt-3">No workspaces are trusted.</div>
+        <div className="text-[12px] text-muted mt-3">暂无可信工作区。</div>
       ) : (
         <div className="mt-3 divide-y divide-line">
           {workspaces.map((workspace) => (
@@ -502,16 +520,16 @@ function TrustedWorkspacesCard() {
                 <div className="text-[12.5px] text-ink break-all">{workspace.workspace}</div>
                 <div className="text-[11.5px] text-muted mt-0.5">
                   {workspace.requested_commands.length
-                    ? `${workspace.requested_commands.length} project command allowance${workspace.requested_commands.length === 1 ? "" : "s"}`
-                    : "No project command allowances currently declared"}
-                  {!workspace.exists ? " · Folder unavailable" : ""}
+                    ? `${workspace.requested_commands.length} 条项目命令许可`
+                    : "当前未声明项目命令许可"}
+                  {!workspace.exists ? " · 文件夹不可用" : ""}
                 </div>
               </div>
               <button
                 className="text-[12px] text-red-600 px-2 py-1"
                 onClick={() => void revoke(workspace.workspace)}
               >
-                Revoke
+                撤销
               </button>
             </div>
           ))}
@@ -553,7 +571,7 @@ function UpdateInline() {
     <span className="inline-flex items-center gap-2.5">
       {state === "found" ? (
         <button className={BTN_BORDERED} onClick={install} data-testid="settings-update-install">
-          Update to v{version} and restart
+          更新至 v{version} 并重启
         </button>
       ) : (
         <button
@@ -562,16 +580,16 @@ function UpdateInline() {
           disabled={state === "checking" || state === "installing"}
           data-testid="settings-update-check"
         >
-          {state === "checking" ? "Checking…" : "Check for updates"}
+          {state === "checking" ? "正在检查…" : "检查更新"}
         </button>
       )}
       {(state === "none" || state === "error" || state === "installing") && (
         <span className="text-[12px] text-muted">
           {state === "none"
-            ? "You're on the latest version."
+            ? "当前已是最新版本。"
             : state === "error"
-              ? "Couldn't check right now — try again later."
-              : "Downloading — OpenWorker restarts by itself when it's ready."}
+              ? "暂时无法检查更新，请稍后再试。"
+              : "正在下载；完成后文枢将自动重启。"}
         </span>
       )}
     </span>
@@ -610,36 +628,34 @@ function TokenSavingsCard() {
   if (!pdf) return null;
   return (
     <div className={CARD + " p-4 mb-4"} data-testid="token-savings-card">
-      <div className={FIELD_LABEL}>Token savings</div>
+      <div className={FIELD_LABEL}>节省令牌</div>
       <div className={FIELD_HELP}>
-        PDF attachments travel with every turn of a conversation, so large documents multiply
-        what you spend on tokens.
+        PDF 附件会随会话的每一轮一同发送，因此大文档会显著增加令牌消耗。
       </div>
 
-      <div className="mt-3 text-[13px] text-ink">PDFs on models without native PDF support</div>
-      <div className="seg mt-2" role="radiogroup" aria-label="PDF fallback" data-testid="pdf-fallback">
+      <div className="mt-3 text-[13px] text-ink">模型不原生支持 PDF 时</div>
+      <div className="seg mt-2" role="radiogroup" aria-label="PDF 处理方式" data-testid="pdf-fallback">
         <button
           className={pdf.pdf_fallback === "text" ? "active" : ""}
           onClick={() => save({ pdf_fallback: "text" })}
         >
-          Extract text
+          提取文字
         </button>
         <button
           className={pdf.pdf_fallback === "images" ? "active" : ""}
           onClick={() => save({ pdf_fallback: "images" })}
         >
-          Send page images
+          发送页面图片
         </button>
       </div>
       <div className={FIELD_HELP}>
-        Claude, GPT and Gemini read PDFs natively — this only applies to models that
-        don&rsquo;t (GLM, Kimi, DeepSeek, local models…). Text extraction is cheapest; page
-        images cost more tokens and need a vision-capable model.
+        Claude、GPT 和 Gemini 可直接读取 PDF；此设置仅适用于 GLM、Kimi、DeepSeek、本地模型等不原生支持 PDF 的模型。
+        提取文字最节省令牌；页面图片消耗更多令牌，并且需要支持视觉的模型。
       </div>
 
       <div className="mt-3 flex items-center gap-5">
         <label className="flex items-center gap-2.5">
-          <span className="text-[13px] text-ink">Max pages</span>
+          <span className="text-[13px] text-ink">最多页数</span>
           <input
             type="number"
             min={1}
@@ -651,7 +667,7 @@ function TokenSavingsCard() {
           />
         </label>
         <label className="flex items-center gap-2.5">
-          <span className="text-[13px] text-ink">Max size</span>
+          <span className="text-[13px] text-ink">最大大小</span>
           <input
             type="number"
             min={1}
@@ -665,8 +681,7 @@ function TokenSavingsCard() {
         </label>
       </div>
       <div className={FIELD_HELP}>
-        PDFs over these limits are not attached — you&rsquo;ll see a notice in the composer
-        instead.
+        超过这些限制的 PDF 不会被添加，你将在输入框上方看到提示。
       </div>
     </div>
   );
@@ -690,9 +705,9 @@ function SidebarCard() {
   if (peek === null) return null;
   return (
     <div className={CARD + " p-4 mb-4"}>
-      <div className={FIELD_LABEL}>Sidebar</div>
+      <div className={FIELD_LABEL}>侧边栏</div>
       <label className="flex items-center gap-3 mt-2.5">
-        <span className="text-[13px] text-ink">Conversations shown per coworker</span>
+        <span className="text-[13px] text-ink">每个角色显示的会话数</span>
         <input
           type="number"
           min={1}
@@ -703,7 +718,7 @@ function SidebarCard() {
         />
       </label>
       <div className={FIELD_HELP}>
-        Longer lists collapse behind &ldquo;Show more&rdquo;. Applies per coworker and per project.
+        更长的列表会收进“显示更多”，分别应用于每个角色和每个项目。
       </div>
     </div>
   );
@@ -732,10 +747,10 @@ function FilesCard() {
     setScratchMsg(null);
     const res = await setScratchBase(scratchDraft.trim());
     if (res.ok) {
-      setScratchMsg("Saved. New conversations will use this location.");
+      setScratchMsg("已保存。新会话将使用此位置。");
       refresh();
     } else {
-      setScratchMsg(res.error || "Could not use that location.");
+      setScratchMsg(res.error || "无法使用此位置。");
     }
   };
   const browseScratch = async () => {
@@ -747,12 +762,12 @@ function FilesCard() {
 
   return (
     <div className={CARD + " p-4 mb-4"}>
-      <div className={FIELD_LABEL}>Files</div>
+      <div className={FIELD_LABEL}>文件</div>
         <div className="flex items-center gap-2 mt-2.5">
           <input
             className={INPUT}
             type="text"
-            placeholder="~/OpenWorker"
+            placeholder="~/WenShu"
             value={scratchDraft}
             spellCheck={false}
             autoComplete="off"
@@ -760,17 +775,16 @@ function FilesCard() {
             onKeyDown={(e) => e.key === "Enter" && saveScratch()}
           />
           {desktop && (
-            <button className={BTN_BORDERED} onClick={browseScratch} title="Pick a folder">
-              Browse
+            <button className={BTN_BORDERED} onClick={browseScratch} title="选择文件夹">
+              浏览
             </button>
           )}
           <button className={BTN_ACCENT} onClick={saveScratch} disabled={!scratchDraft.trim()}>
-            Save
+            保存
           </button>
         </div>
       <div className={FIELD_HELP}>
-        Each conversation gets its own folder under this location. Existing conversations keep their current
-        folder; you can grant access to more folders inside any conversation.
+        每个会话都会在此位置下获得独立文件夹。已有会话保留当前文件夹；你可以在会话中授权访问更多文件夹。
       </div>
       {scratchMsg && <div className="text-[12.5px] text-muted mt-2.5">{scratchMsg}</div>}
     </div>

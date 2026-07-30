@@ -111,7 +111,9 @@ def _find_reply(outbound, channel, text):
     ]
 
 
-async def test_ui_refresh_cross_cutting_e2e(fake_slack, tmp_path, monkeypatch):
+async def test_ui_refresh_cross_cutting_e2e(
+    fake_slack, tmp_path, monkeypatch, permissive_product
+):
     # Isolate the SecretStore (machine-global otherwise) so "is slack connected?" is decided only
     # by what this test writes; the manager's own data dir lives under tmp_path/.coworker.
     monkeypatch.setenv("COWORKER_STATE_DIR", str(tmp_path / "state"))
@@ -136,7 +138,9 @@ async def test_ui_refresh_cross_cutting_e2e(fake_slack, tmp_path, monkeypatch):
         ]
     )
 
-    mgr = SessionManager(workspace=tmp_path, provider=provider)
+    mgr = SessionManager(
+        workspace=tmp_path, provider=provider, product=permissive_product
+    )
     try:
         # -- Step 1: connect Slack (real adapter -> FakeSlack via the manager's gateway) ----------
         mgr.secrets.put(
